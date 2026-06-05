@@ -59,7 +59,7 @@
         "guid": "maintainer-sustainability",
         "status": "active",
         "name": "Maintainer sustainability for LLM4S",
-        "description": "LLM4S is requesting USD 25,000 in one-time support to sustain development of critical Scala and JVM AI infrastructure. The funding will support maintainer and contributor time, contributor onboarding, documentation, tutorials, examples, release engineering, CI, testing, security hardening, community Dev Hours, and production-readiness work. This support will help the project move from a volunteer-led effort to a more sustainable open-source project serving Scala, JVM, AI, functional programming, and enterprise developer communities. It will also support the project's transition toward stronger governance and legal registration for long-term stewardship.",
+        "description": "One-time support for LLM4S maintainer time, contributor onboarding, documentation, examples, release engineering, CI, testing, security hardening, community Dev Hours, production readiness, and transition toward stronger governance and legal registration.",
         "amount": 25000,
         "currency": "USD",
         "frequency": "one-time",

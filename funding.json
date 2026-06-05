@@ -28,26 +28,14 @@
       "tags": [
         "ai",
         "llm",
-        "generative-ai",
         "scala",
-        "scala-lang",
         "jvm",
-        "java-ecosystem",
         "functional-programming",
-        "type-safety",
         "developer-tools",
-        "framework",
         "agents",
-        "agentic-ai",
         "rag",
-        "retrieval-augmented-generation",
-        "tool-calling",
-        "mcp",
         "observability",
-        "tracing",
-        "streaming",
-        "enterprise-ai",
-        "open-source"
+        "enterprise-ai"
       ]
     }
   ],

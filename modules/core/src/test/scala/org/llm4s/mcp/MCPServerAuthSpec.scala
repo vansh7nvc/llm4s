@@ -7,7 +7,10 @@ import org.scalatest.BeforeAndAfterAll
 import org.llm4s.toolapi.{ Schema, SafeParameterExtractor, ToolBuilder }
 import org.slf4j.LoggerFactory
 
+import java.io.{ BufferedReader, InputStreamReader }
 import java.net.{ HttpURLConnection, URI }
+import java.util.concurrent.{ CountDownLatch, Executors, TimeUnit }
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Tests for MCPServer Bearer-token authentication.
@@ -33,13 +36,11 @@ class MCPServerAuthSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll 
 
     val pingTool = buildPingTool()
 
-    // Server WITH authentication
     val authOpts = MCPServerOptions(0, "/mcp", "AuthTestServer", "1.0", apiKey = Some(apiKey))
     authServer = new MCPServer(authOpts, Seq(pingTool))
     authServer.start().fold(e => throw e, _ => ())
     authPort = authServer.boundPort
 
-    // Server WITHOUT authentication (dev mode)
     val openOpts = MCPServerOptions(0, "/mcp", "OpenTestServer", "1.0")
     openServer = new MCPServer(openOpts, Seq(pingTool))
     openServer.start().fold(e => throw e, _ => ())
@@ -50,8 +51,6 @@ class MCPServerAuthSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll 
     if (authServer != null) authServer.stop()
     if (openServer != null) openServer.stop()
   }
-
-  // ── Authenticated server ────────────────────────────────────────────────
 
   describe("Authenticated MCPServer") {
 
@@ -81,7 +80,6 @@ class MCPServerAuthSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll 
       conn.setRequestProperty("Authorization", s"BEARER $apiKey")
       val body = initializeRequestBody("3")
       conn.getOutputStream.write(body.getBytes("UTF-8"))
-      // The key comparison is case-sensitive; only the "Bearer " prefix is case-insensitive
       conn.getResponseCode shouldBe 200
     }
 
@@ -112,7 +110,6 @@ class MCPServerAuthSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll 
     }
 
     it("should accept requests after correct token via MCPClient (Streamable HTTP)") {
-      // Confirms the server correctly processes an authenticated direct HTTP call
       val conn = openConnection(authPort, "/mcp", "POST")
       conn.setDoOutput(true)
       conn.setRequestProperty("Content-Type", "application/json")
@@ -126,8 +123,6 @@ class MCPServerAuthSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll 
       responseBody should include("AuthTestServer")
     }
   }
-
-  // ── Open (dev-mode) server ───────────────────────────────────────────────
 
   describe("Open MCPServer (no apiKey)") {
 
@@ -151,7 +146,64 @@ class MCPServerAuthSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll 
     }
   }
 
-  // ── Helpers ──────────────────────────────────────────────────────────────
+  describe("MCPServer with host=0.0.0.0") {
+
+    it("should rewrite 0.0.0.0 to 127.0.0.1 in SSE endpoint event") {
+      val wildcardOpts = MCPServerOptions(0, "/mcp", "WildcardServer", "1.0", apiKey = Some(apiKey), host = "0.0.0.0")
+      val tool         = buildPingTool()
+      val srv          = new MCPServer(wildcardOpts, Seq(tool))
+      srv.start().fold(e => throw e, _ => ())
+      val srvPort = srv.boundPort
+
+      val endpointLatch = new CountDownLatch(1)
+      val endpointUrl   = new AtomicReference[String]("")
+      val executor      = Executors.newSingleThreadExecutor()
+
+      val conn =
+        URI.create(s"http://127.0.0.1:$srvPort/mcp/sse").toURL.openConnection().asInstanceOf[HttpURLConnection]
+      conn.setRequestMethod("GET")
+      conn.setRequestProperty("Accept", "text/event-stream")
+      conn.setRequestProperty("Authorization", s"Bearer $apiKey")
+      conn.setConnectTimeout(3000)
+      conn.setReadTimeout(5000)
+
+      executor.submit(new Runnable {
+        override def run(): Unit =
+          try {
+            val reader = new BufferedReader(new InputStreamReader(conn.getInputStream, "UTF-8"))
+            val sb     = new StringBuilder
+            var line   = reader.readLine()
+            while (line != null) {
+              if (line.isEmpty) {
+                val event = sb.toString()
+                if (event.startsWith("event: endpoint")) {
+                  val url =
+                    event.linesIterator.find(_.startsWith("data: ")).map(_.stripPrefix("data: ").trim).getOrElse("")
+                  endpointUrl.set(url)
+                  endpointLatch.countDown()
+                }
+                sb.clear()
+              } else {
+                if (sb.nonEmpty) sb.append("\n")
+                sb.append(line)
+              }
+              line = reader.readLine()
+            }
+          } catch { case _: Exception => () }
+      })
+
+      try {
+        endpointLatch.await(5, TimeUnit.SECONDS) shouldBe true
+        endpointUrl.get() should include("127.0.0.1")
+        endpointUrl.get() should not include "0.0.0.0"
+      } finally {
+        conn.disconnect()
+        executor.shutdown()
+        executor.awaitTermination(2, TimeUnit.SECONDS)
+        srv.stop()
+      }
+    }
+  }
 
   private def openConnection(port: Int, path: String, method: String): HttpURLConnection = {
     val conn = URI.create(s"http://127.0.0.1:$port$path").toURL.openConnection().asInstanceOf[HttpURLConnection]

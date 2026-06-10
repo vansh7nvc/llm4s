@@ -3,12 +3,13 @@ package org.llm4s.benchmarks
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-/** Verifies each benchmark can initialize and execute at least one iteration without error.
-  *
-  * These tests are NOT JMH runs — they simply instantiate the benchmark state and call each
-  * benchmark method once to confirm the harness is wired correctly before running the full
-  * benchmark suite with `benchmarks/Jmh/run`.
-  */
+/**
+ * Verifies each benchmark can initialize and execute at least one iteration without error.
+ *
+ * These tests are NOT JMH runs — they simply instantiate the benchmark state and call each
+ * benchmark method once to confirm the harness is wired correctly before running the full
+ * benchmark suite with `benchmarks/Jmh/run`.
+ */
 class BenchmarkSmokeTest extends AnyFlatSpec with Matchers {
 
   "TokenCountingBenchmark" should "initialize and run all methods without error" in {

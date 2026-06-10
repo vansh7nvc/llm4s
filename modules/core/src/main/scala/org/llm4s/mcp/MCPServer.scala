@@ -8,43 +8,58 @@ import upickle.default.{ read => upickleRead, write => upickleWrite }
 
 import java.net.InetSocketAddress
 import java.util.UUID
+import java.util.concurrent.{ ConcurrentHashMap, Executors, ExecutorService, LinkedBlockingQueue, TimeUnit }
 
 import scala.collection.concurrent.TrieMap
-import java.util.concurrent.{ Executors, ExecutorService, TimeUnit }
 import scala.util.{ Failure, Success, Try, Using }
 
 /**
  * Configuration options for the MCPServer.
  *
- * @param port The port to bind to (e.g., 8080)
- * @param path The path for the MCP endpoint (e.g., "/mcp")
- * @param name The server name to report in initialization
- * @param version The server version to report in initialization
+ * @param port    Port to bind to. Use 0 for a random available port.
+ * @param path    Base path for MCP endpoints (e.g. "/mcp").
+ * @param name    Server name reported during MCP initialization.
+ * @param version Server version reported during MCP initialization.
+ * @param apiKey  Optional API key for Bearer-token authentication.
+ *                When set, every request must include `Authorization: Bearer <key>`.
+ *                Configuring an API key removes the development-only security
+ *                warning and allows binding to non-localhost interfaces via `host`.
+ * @param host    Network interface to bind to (default "127.0.0.1").
+ *                Change to "0.0.0.0" (or a specific IP) only when `apiKey` is set.
  */
 case class MCPServerOptions(
   port: Int,
   path: String,
   name: String,
-  version: String
+  version: String,
+  apiKey: Option[String] = None,
+  host: String = "127.0.0.1"
 )
 
 /**
  * A generic, reusable Model Context Protocol (MCP) Server.
  *
- * This server hosts a list of llm4s `ToolFunction`s and exposes them
- * via the MCP protocol (HTTP Transport 2025-06-18 only).
+ * Exposes a list of llm4s `ToolFunction`s via two transport protocols:
  *
- * NOTE: This server is intended for LOCAL DEVELOPMENT use only.
- * It does not implement authentication or strict security sandboxing.
- * ```scala
- * val tools = Seq(myTool1, myTool2)
- * val options = MCPServerOptions(8080, "/mcp", "MyServer", "1.0")
- * val server = new MCPServer(options, tools)
+ *  - **MCP 2025-06-18 Streamable HTTP** — POST / DELETE `{path}`
+ *  - **MCP 2024-11-05 HTTP+SSE** — GET `{path}/sse` + POST `{path}/messages?sessionId=…`
+ *    (required by Claude Desktop and other legacy MCP clients)
+ *
+ * === Authentication ===
+ * Set `MCPServerOptions.apiKey` to enable Bearer-token authentication.  When set,
+ * every HTTP request must include `Authorization: Bearer <key>`; unauthenticated
+ * requests receive HTTP 401.  Without an API key the server binds only to
+ * `127.0.0.1` and logs a warning that it is for local development only.
+ *
+ * {{{
+ * val tools   = Seq(myTool1, myTool2)
+ * val options = MCPServerOptions(8080, "/mcp", "MyServer", "1.0", apiKey = Some("secret"))
+ * val server  = new MCPServer(options, tools)
  * server.start()
- * ```
+ * }}}
  *
- * @param options Server configuration
- * @param tools List of tools to expose
+ * @param options Server configuration.
+ * @param tools   List of tools to expose.
  */
 class MCPServer(
   options: MCPServerOptions,
@@ -54,8 +69,14 @@ class MCPServer(
   private var server: Option[HttpServer]       = None
   private var executorService: ExecutorService = _
 
-  // Map for fast tool lookup
   private val toolMap: Map[String, ToolFunction[_, _]] = tools.map(t => t.name -> t).toMap
+
+  // SSE connection management – one entry per open SSE connection
+  private case class SSEConnection(
+    sessionId: String,
+    queue: LinkedBlockingQueue[Option[String]] // None is the close signal
+  )
+  private val sseConnections = new ConcurrentHashMap[String, SSEConnection]()
 
   def boundPort: Int = server.map(_.getAddress.getPort).getOrElse(-1)
   def getPort: Int   = boundPort
@@ -66,21 +87,26 @@ class MCPServer(
       return Right(())
     }
 
-    logger.warn("!!! SECURITY WARNING !!!")
-    logger.warn("This server is intended for local development only. Do not use in production.")
-    logger.warn("It does not implement authentication or strict security boundaries.")
+    if (options.apiKey.isDefined) {
+      logger.info("MCPServer starting with API key authentication enabled")
+    } else {
+      logger.warn("!!! SECURITY WARNING !!!")
+      logger.warn("This server is intended for local development only. Do not expose to untrusted networks.")
+      logger.warn("Set apiKey in MCPServerOptions to enable bearer-token authentication for production use.")
+    }
 
     Try {
-      val httpServer = HttpServer.create(new InetSocketAddress("127.0.0.1", options.port), 0)
+      val httpServer = HttpServer.create(new InetSocketAddress(options.host, options.port), 0)
       httpServer.createContext(options.path, new MCPHandler)
-      // Use a bounded thread pool to prevent resource exhaustion
-      executorService = Executors.newFixedThreadPool(16)
+      // Use a cached thread pool to support long-lived SSE connections alongside short HTTP requests
+      executorService = Executors.newCachedThreadPool()
       httpServer.setExecutor(executorService)
       httpServer.start()
       server = Some(httpServer)
       val actualPort = httpServer.getAddress.getPort
-      logger.info(s"MCPServer '${options.name}' started on http://127.0.0.1:$actualPort${options.path}")
+      logger.info(s"MCPServer '${options.name}' started on http://${options.host}:$actualPort${options.path}")
       logger.info(s"Exposing ${tools.size} tools: ${tools.map(_.name).mkString(", ")}")
+      logger.info(s"SSE transport (2024-11-05) at http://${options.host}:$actualPort${options.path}/sse")
     }.toEither.left.map { case e: Exception =>
       logger.error(s"Failed to start MCPServer: ${e.getMessage}", e)
       e
@@ -90,11 +116,14 @@ class MCPServer(
   def stop(delay: Int = 0): Unit = synchronized {
     server.foreach { s =>
       logger.info("Stopping MCPServer...")
+      // Close all open SSE connections gracefully
+      sseConnections.values().forEach(conn => Try(conn.queue.put(None)))
+      sseConnections.clear()
       s.stop(delay)
       if (executorService != null) {
         executorService.shutdown()
         Try {
-          if (!executorService.awaitTermination(delay.toLong, TimeUnit.SECONDS)) {
+          if (!executorService.awaitTermination((delay + 5).toLong, TimeUnit.SECONDS)) {
             executorService.shutdownNow()
           }
         }.recover { case _: InterruptedException => executorService.shutdownNow() }
@@ -104,7 +133,7 @@ class MCPServer(
     }
   }
 
-  // Session management logic (internal)
+  // HTTP session store for Streamable HTTP transport (2025-06-18)
   private case class Session(
     id: String,
     protocolVersion: String,
@@ -130,25 +159,222 @@ class MCPServer(
     }
   }
 
-  // HTTP Handler implementation
+  // Shared tool execution – used by both Streamable HTTP and SSE transports
+
+  private def handleToolsList(request: JsonRpcRequest): JsonRpcResponse = {
+    val mcpTools = tools.map { tool =>
+      MCPTool(
+        name = tool.name,
+        description = tool.description,
+        inputSchema = tool.toOpenAITool(strict = false)("function")("parameters")
+      )
+    }
+    JsonRpcResponse(id = request.id, result = Some(upickle.default.writeJs(ToolsListResponse(mcpTools))))
+  }
+
+  private def handleToolsCall(request: JsonRpcRequest): JsonRpcResponse = {
+    val toolName  = request.params.flatMap(_.obj.get("name")).map(_.str).getOrElse("")
+    val arguments = request.params.flatMap(_.obj.get("arguments")).getOrElse(ujson.Obj())
+    logger.info(s"Executing tool: $toolName")
+    toolMap.get(toolName) match {
+      case Some(tool) =>
+        tool.execute(arguments) match {
+          case Right(resultJson) =>
+            val resultString = resultJson match {
+              case ujson.Str(s) => s
+              case other        => other.render()
+            }
+            val response = ToolsCallResponse(
+              content = Seq(MCPContent(`type` = "text", text = Some(resultString))),
+              isError = Some(false)
+            )
+            JsonRpcResponse(id = request.id, result = Some(upickle.default.writeJs(response)))
+          case Left(error) =>
+            logger.error(s"Tool execution failed: $toolName - $error")
+            JsonRpcResponse(
+              id = request.id,
+              error = Some(JsonRpcError(MCPErrorCodes.TOOL_EXECUTION_ERROR, s"Tool failed: $error", None))
+            )
+        }
+      case None =>
+        JsonRpcResponse(
+          id = request.id,
+          error = Some(JsonRpcError(MCPErrorCodes.TOOL_NOT_FOUND, s"Tool not found: $toolName", None))
+        )
+    }
+  }
+
+  // Dispatch a JSON-RPC request for the SSE transport (no HTTP session management)
+  private def processSSERequest(request: JsonRpcRequest): JsonRpcResponse =
+    request.method match {
+      case "initialize" =>
+        val initReq = request.params
+          .flatMap(p => Try(upickleRead[InitializeRequest](p.toString)).toOption)
+          .getOrElse(InitializeRequest("2024-11-05", MCPCapabilities(), ClientInfo("unknown", "1.0")))
+        logger.info(s"SSE initialize: client=${initReq.clientInfo.name}, protocol=${initReq.protocolVersion}")
+        JsonRpcResponse(
+          id = request.id,
+          result = Some(
+            upickle.default.writeJs(
+              InitializeResponse(
+                protocolVersion = "2024-11-05",
+                capabilities = MCPCapabilities(tools = Some(Obj())),
+                serverInfo = ServerInfo(options.name, options.version)
+              )
+            )
+          )
+        )
+      case "tools/list" => handleToolsList(request)
+      case "tools/call" => handleToolsCall(request)
+      case other =>
+        JsonRpcResponse(
+          id = request.id,
+          error = Some(JsonRpcError(MCPErrorCodes.METHOD_NOT_FOUND, s"Method not found: $other", None))
+        )
+    }
+
+  // HTTP handler – entry point for all incoming requests
   private class MCPHandler extends HttpHandler {
     override def handle(exchange: HttpExchange): Unit = {
+      // Authentication gate – checked before any routing
+      if (!isAuthorized(exchange)) {
+        exchange.getResponseHeaders.set("WWW-Authenticate", "Bearer")
+        sendErrorResponse(exchange, 401, "Unauthorized")
+        return
+      }
+
       val method = exchange.getRequestMethod
-      logger.debug(s"$method ${exchange.getRequestURI}")
+      val path   = exchange.getRequestURI.getPath
+      logger.debug(s"$method $path")
 
       Try {
-        method match {
-          case "POST"   => handlePOST(exchange)
-          case "DELETE" => handleDELETE(exchange)
-          case _        => sendErrorResponse(exchange, 405, "Method not allowed")
+        (method, path) match {
+          case ("GET", p) if p.endsWith("/sse")       => handleSSEGet(exchange)
+          case ("POST", p) if p.endsWith("/messages") => handleSSEPost(exchange)
+          case ("POST", _)                            => handlePOST(exchange)
+          case ("DELETE", _)                          => handleDELETE(exchange)
+          case _                                      => sendErrorResponse(exchange, 405, "Method not allowed")
         }
       }.recover { case e =>
-        logger.error(s"Unhandled error in $method: ${e.getMessage}", e)
-        sendErrorResponse(exchange, 500, s"Internal server error: ${e.getMessage}")
+        logger.error(s"Unhandled error in $method $path: ${e.getMessage}", e)
+        Try(sendErrorResponse(exchange, 500, "Internal server error"))
       }
     }
 
-    private val MaxPayloadSize = 10 * 1024 * 1024 // 10 MB
+    private def isAuthorized(exchange: HttpExchange): Boolean =
+      options.apiKey match {
+        case None => true
+        case Some(key) =>
+          Option(exchange.getRequestHeaders.getFirst("Authorization"))
+            .map(_.trim)
+            .exists { header =>
+              header.length > 7 &&
+              header.substring(0, 7).equalsIgnoreCase("Bearer ") &&
+              header.substring(7) == key
+            }
+      }
+
+    // ── SSE transport (MCP 2024-11-05) ──────────────────────────────────────
+
+    private def handleSSEGet(exchange: HttpExchange): Unit = {
+      val sessionId = UUID.randomUUID().toString
+      val queue     = new LinkedBlockingQueue[Option[String]]()
+      sseConnections.put(sessionId, SSEConnection(sessionId, queue))
+
+      // Build the POST-target URL that the client will use for requests
+      val localPort  = exchange.getLocalAddress.getPort
+      val hostForUrl = if (options.host == "0.0.0.0") "127.0.0.1" else options.host
+      val messageUrl = s"http://$hostForUrl:$localPort${options.path}/messages?sessionId=$sessionId"
+
+      exchange.getResponseHeaders.set("Content-Type", "text/event-stream")
+      exchange.getResponseHeaders.set("Cache-Control", "no-cache")
+      exchange.getResponseHeaders.set("Connection", "keep-alive")
+      exchange.sendResponseHeaders(200, 0) // 0 = chunked transfer encoding
+
+      val os = exchange.getResponseBody
+
+      def writeEvent(event: String): Boolean =
+        Try { os.write(event.getBytes("UTF-8")); os.flush() }.isSuccess
+
+      try {
+        // Per MCP 2024-11-05 spec: first SSE event tells the client where to POST
+        if (!writeEvent(s"event: endpoint\ndata: $messageUrl\n\n")) {
+          logger.warn(s"SSE($sessionId) client disconnected before endpoint event")
+          return
+        }
+        logger.info(s"SSE connection opened: sessionId=$sessionId, messageUrl=$messageUrl")
+
+        var running = true
+        while (running)
+          queue.poll(30L, TimeUnit.SECONDS) match {
+            case null        => running = writeEvent(": keepalive\n\n")
+            case None        => running = false // close signal from stop()
+            case Some(event) => running = writeEvent(event)
+          }
+      } finally {
+        sseConnections.remove(sessionId)
+        Try(os.close())
+        exchange.close()
+        logger.info(s"SSE connection closed: sessionId=$sessionId")
+      }
+    }
+
+    private def handleSSEPost(exchange: HttpExchange): Unit = {
+      val sessionId = Option(exchange.getRequestURI.getQuery)
+        .getOrElse("")
+        .split("&")
+        .find(_.startsWith("sessionId="))
+        .map(_.stripPrefix("sessionId="))
+
+      sessionId match {
+        case None =>
+          sendErrorResponse(exchange, 400, "Missing sessionId query parameter")
+        case Some(sid) =>
+          Option(sseConnections.get(sid)) match {
+            case None =>
+              sendErrorResponse(exchange, 400, s"Unknown SSE session: $sid")
+            case Some(conn) =>
+              val result = for {
+                bodyStr <- readBodyWithLimit(exchange, MaxPayloadSize)
+                json    <- Try(ujson.read(bodyStr))
+              } yield (bodyStr, json)
+
+              result match {
+                case Failure(e) if Option(e.getMessage).contains("Payload too large") =>
+                  sendErrorResponse(exchange, 413, "Payload too large")
+                case Failure(e) =>
+                  logger.error(s"SSE($sid) bad request: ${e.getMessage}")
+                  sendErrorResponse(exchange, 400, "Bad request")
+                case Success((bodyStr, json)) =>
+                  if (json.obj.contains("id")) {
+                    Try(upickleRead[JsonRpcRequest](bodyStr)) match {
+                      case Failure(e) =>
+                        sendErrorResponse(exchange, 400, s"Invalid JSON-RPC: ${e.getMessage}")
+                      case Success(request) =>
+                        logger.debug(s"SSE($sid) request: ${request.method} (id=${request.id})")
+                        val response = processSSERequest(request)
+                        val sseEvent = s"event: message\ndata: ${upickleWrite(response)}\n\n"
+                        conn.queue.put(Some(sseEvent))
+                        // POST returns 202 Accepted; the actual response is delivered via SSE stream
+                        exchange.sendResponseHeaders(202, -1)
+                        exchange.close()
+                    }
+                  } else {
+                    // JSON-RPC notification – acknowledge only, no response
+                    Try(upickleRead[JsonRpcNotification](bodyStr)).foreach(handleNotification)
+                    exchange.sendResponseHeaders(202, -1)
+                    exchange.close()
+                  }
+              }
+          }
+      }
+    }
+
+    // ── Streamable HTTP transport (MCP 2025-06-18) ──────────────────────────
+
+    private val MaxPayloadSize = 10 * 1024 * 1024
+
+    private val SupportedVersions = Set("2025-06-18")
 
     private def handlePOST(exchange: HttpExchange): Unit = {
       val contentLengthStr = Option(exchange.getRequestHeaders.getFirst("Content-Length"))
@@ -167,7 +393,6 @@ class MCPServer(
       result match {
         case Success((bodyStr, json)) =>
           if (json.obj.contains("id")) {
-            // It's a request
             Try(upickleRead[JsonRpcRequest](bodyStr)) match {
               case Success(request) =>
                 logger.debug(s"Request: ${request.method} (id: ${request.id})")
@@ -177,23 +402,20 @@ class MCPServer(
                 sendJsonRpcError(exchange, "unknown", MCPErrorCodes.PARSE_ERROR, "Parse error")
             }
           } else {
-            // It's a notification
             Try(upickleRead[JsonRpcNotification](bodyStr)) match {
               case Success(notification) =>
                 logger.debug(s"Notification: ${notification.method}")
                 handleNotification(notification)
-                // Notifications do not receive a response, but we must acknowledge the HTTP request
                 exchange.sendResponseHeaders(200, -1)
                 exchange.close()
               case Failure(e) =>
                 logger.warn(s"Failed to parse notification: ${e.getMessage}")
-                // Even if malformed, for notifications we typically just ignore or log
                 exchange.sendResponseHeaders(200, -1)
                 exchange.close()
             }
           }
 
-        case Failure(e) if e.getMessage == "Payload too large" =>
+        case Failure(e) if Option(e.getMessage).contains("Payload too large") =>
           logger.warn("Payload size exceeded limit")
           sendErrorResponse(exchange, 413, "Payload too large")
 
@@ -203,10 +425,7 @@ class MCPServer(
       }
     }
 
-    private val SupportedVersions = Set("2025-06-18")
-
     private def handleRequest(exchange: HttpExchange, request: JsonRpcRequest): Unit = {
-      // Protocol Version Check
       val protocolValid = if (request.method != "initialize") {
         Option(exchange.getRequestHeaders.getFirst("MCP-Protocol-Version")).exists { version =>
           SupportedVersions.contains(version)
@@ -223,7 +442,6 @@ class MCPServer(
         )
       } else {
         val sessionId = Option(exchange.getRequestHeaders.getFirst("mcp-session-id"))
-
         request.method match {
           case "initialize" => handleInitialize(exchange, request)
           case "tools/list" => handleWithSession(exchange, request, sessionId, handleToolsList)
@@ -235,10 +453,8 @@ class MCPServer(
 
     private def handleNotification(notification: JsonRpcNotification): Unit =
       notification.method match {
-        case "notifications/initialized" =>
-          logger.info("Client initialized notification received")
-        case _ =>
-          logger.debug(s"Received unhandled notification: ${notification.method}")
+        case "notifications/initialized" => logger.info("Client initialized notification received")
+        case _                           => logger.debug(s"Received notification: ${notification.method}")
       }
 
     private def handleInitialize(exchange: HttpExchange, request: JsonRpcRequest): Unit = {
@@ -246,13 +462,10 @@ class MCPServer(
         .flatMap(params => Try(upickleRead[InitializeRequest](params.toString)).toOption)
         .getOrElse(InitializeRequest("2025-06-18", MCPCapabilities(), ClientInfo("unknown", "1.0")))
 
-      // Protocol negotiation
       val clientVersion   = initRequest.protocolVersion
       val protocolVersion = if (SupportedVersions.contains(clientVersion)) clientVersion else "2025-06-18"
-
       logger.info(s"Initializing with protocol: $protocolVersion")
 
-      // Create session for modern protocols
       val sessionOpt = if (protocolVersion == "2025-06-18") {
         Some(SessionStore.createSession(protocolVersion))
       } else None
@@ -269,7 +482,6 @@ class MCPServer(
           )
         )
       )
-
       sendJsonRpcResponse(exchange, response, sessionOpt.map(_.id))
     }
 
@@ -279,7 +491,6 @@ class MCPServer(
       sessionId: Option[String],
       handler: JsonRpcRequest => JsonRpcResponse
     ): Unit =
-      // Basic session validation
       sessionId match {
         case Some(id) if SessionStore.getSession(id).isEmpty =>
           logger.warn(s"Unknown session: $id")
@@ -288,67 +499,6 @@ class MCPServer(
           val response = handler(request)
           sendJsonRpcResponse(exchange, response, sessionId)
       }
-
-    private def handleToolsList(request: JsonRpcRequest): JsonRpcResponse = {
-      // Convert internal ToolFunctions to MCPTools
-      val mcpTools = tools.map { tool =>
-        MCPTool(
-          name = tool.name,
-          description = tool.description,
-          inputSchema = tool.toOpenAITool(strict = false)("function")("parameters")
-        )
-      }
-
-      JsonRpcResponse(
-        id = request.id,
-        result = Some(upickle.default.writeJs(ToolsListResponse(mcpTools)))
-      )
-    }
-
-    private def handleToolsCall(request: JsonRpcRequest): JsonRpcResponse = {
-      val toolName  = request.params.flatMap(_.obj.get("name")).map(_.str).getOrElse("")
-      val arguments = request.params.flatMap(_.obj.get("arguments")).getOrElse(ujson.Obj())
-
-      logger.info(s"Executing tool: $toolName")
-
-      toolMap.get(toolName) match {
-        case Some(tool) =>
-          // Execute with arguments
-          tool.execute(arguments) match {
-            case Right(resultJson) =>
-              // Convert result to string/text for MCPContent
-              // This naive stringification works for simple values;
-              // for objects it renders the JSON string.
-              val resultString = resultJson match {
-                case ujson.Str(s) => s
-                case other        => other.render()
-              }
-
-              val response = ToolsCallResponse(
-                content = Seq(MCPContent(`type` = "text", text = Some(resultString))),
-                isError = Some(false)
-              )
-              JsonRpcResponse(id = request.id, result = Some(upickle.default.writeJs(response)))
-
-            case Left(error) =>
-              // execution failed
-              logger.error(s"Tool execution failed: $toolName - $error")
-              // We return a "successful" JSON-RPC response but with isError=true in content
-              // OR a JSON-RPC error. MCP spec allows either, but isError in content is often preferred for application errors.
-              // Let's use JSON-RPC error for consistency with demo.
-              JsonRpcResponse(
-                id = request.id,
-                error = Some(JsonRpcError(MCPErrorCodes.TOOL_EXECUTION_ERROR, s"Tool failed: ${error}", None))
-              )
-          }
-
-        case None =>
-          JsonRpcResponse(
-            id = request.id,
-            error = Some(JsonRpcError(MCPErrorCodes.TOOL_NOT_FOUND, s"Tool not found: $toolName", None))
-          )
-      }
-    }
 
     private def handleDELETE(exchange: HttpExchange): Unit = {
       val sessionId = Option(exchange.getRequestHeaders.getFirst("mcp-session-id"))
@@ -364,7 +514,7 @@ class MCPServer(
       }
     }
 
-    // --- Helper methods ---
+    // ── HTTP helpers ─────────────────────────────────────────────────────────
 
     private def sendJsonRpcError(exchange: HttpExchange, id: String, code: Int, message: String): Unit = {
       val error = JsonRpcResponse(id = id, error = Some(JsonRpcError(code, message, None)))
@@ -386,7 +536,6 @@ class MCPServer(
       exchange.getResponseHeaders.set("Content-Type", contentType)
       exchange.getResponseHeaders.set("Content-Length", bytes.length.toString)
       exchange.sendResponseHeaders(statusCode, bytes.length.toLong)
-
       Using(exchange.getResponseBody) { os =>
         os.write(bytes)
         os.flush()

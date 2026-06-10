@@ -1,5 +1,6 @@
 package org.llm4s.benchmarks
 
+import org.llm4s.error.LLMError
 import org.llm4s.types.Result
 import org.llm4s.vectorstore.{ KeywordDocument, KeywordIndex, KeywordSearchResult, SQLiteKeywordIndex }
 import org.openjdk.jmh.annotations._
@@ -12,14 +13,20 @@ import java.util.concurrent.TimeUnit
 @Warmup(iterations = 3, time = 1, timeUnit = TimeUnit.SECONDS)
 @Measurement(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
 @Fork(1)
-class KeywordIndexBenchmark {
+class KeywordIndexBenchmark(
+  private val indexFactory: () => Result[KeywordIndex]
+) {
+  def this() = this(() => SQLiteKeywordIndex.inMemory())
 
   private var index: KeywordIndex     = _
   private var oneDoc: KeywordDocument = _
 
+  private[benchmarks] def raiseSetupError(e: LLMError): Nothing =
+    throw new RuntimeException(e.formatted)
+
   @Setup(Level.Trial)
   def setup(): Unit = {
-    index = SQLiteKeywordIndex.inMemory().fold(e => throw new RuntimeException(e.formatted), identity)
+    index = indexFactory().fold(raiseSetupError, identity)
     oneDoc = KeywordDocument("bench-single", "scala jvm programming language benchmark performance")
     index.indexBatch(BenchmarkFixtures.makeDocuments(1000))
   }

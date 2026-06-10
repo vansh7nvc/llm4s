@@ -1,6 +1,7 @@
 package org.llm4s.benchmarks
 
 import org.llm4s.context.{ ConversationTokenCounter, DeterministicCompressor }
+import org.llm4s.error.LLMError
 import org.llm4s.llmconnect.model.Message
 import org.llm4s.types.Result
 import org.openjdk.jmh.annotations._
@@ -13,16 +14,22 @@ import java.util.concurrent.TimeUnit
 @Warmup(iterations = 3, time = 1, timeUnit = TimeUnit.SECONDS)
 @Measurement(iterations = 5, time = 1, timeUnit = TimeUnit.SECONDS)
 @Fork(1)
-class ContextCompressionBenchmark {
+class ContextCompressionBenchmark(
+  private val counterFactory: () => Result[ConversationTokenCounter]
+) {
+  def this() = this(() => ConversationTokenCounter.openAI())
 
   private var counter: ConversationTokenCounter = _
   private var small: Seq[Message]               = _
   private var medium: Seq[Message]              = _
   private var large: Seq[Message]               = _
 
+  private[benchmarks] def raiseSetupError(e: LLMError): Nothing =
+    throw new RuntimeException(e.formatted)
+
   @Setup(Level.Trial)
   def setup(): Unit = {
-    counter = ConversationTokenCounter.openAI().fold(e => throw new RuntimeException(e.formatted), identity)
+    counter = counterFactory().fold(raiseSetupError, identity)
     small = BenchmarkFixtures.makeConversation(20).messages
     medium = BenchmarkFixtures.makeConversation(200).messages
     large = BenchmarkFixtures.makeConversation(500).messages

@@ -3,7 +3,6 @@ package org.llm4s.benchmarks
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi._
 import org.llm4s.vectorstore.KeywordDocument
-import upickle.default._
 
 object BenchmarkFixtures {
 
@@ -37,20 +36,17 @@ object BenchmarkFixtures {
       )
     }
 
-  case class EchoResult(echoed: String)
-  implicit val echoRW: ReadWriter[EchoResult] = macroRW
-
   def makeToolRegistry(toolCount: Int): ToolRegistry = {
     val tools = (0 until toolCount).flatMap { i =>
       val schema = Schema
         .`object`[Map[String, Any]](s"Parameters for echo tool $i")
         .withProperty(Schema.property("message", Schema.string("Message to echo")))
 
-      ToolBuilder[Map[String, Any], EchoResult](
+      ToolBuilder[Map[String, Any], String](
         s"echo_$i",
         s"Echoes a message (tool $i)",
         schema
-      ).withHandler(extractor => extractor.getString("message").map(msg => EchoResult(s"echo-$i: $msg")))
+      ).withHandler(extractor => extractor.getString("message").map(msg => s"echo-$i: $msg"))
         .buildSafe()
         .toOption
     }

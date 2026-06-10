@@ -323,7 +323,6 @@ lazy val benchmarks = (project in file("modules/benchmarks"))
     name           := "benchmarks",
     commonSettings,
     publish / skip := true,
-    coverageEnabled := false,
     libraryDependencies ++= Seq(
       Deps.scalatest % Test
     )

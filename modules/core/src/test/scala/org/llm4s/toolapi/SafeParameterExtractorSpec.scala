@@ -151,13 +151,13 @@ class SafeParameterExtractorSpec extends AnyFlatSpec with Matchers {
   it should "return Left with one error when a parameter is missing" in {
     val ex     = SafeParameterExtractor(ujson.Obj("name" -> ujson.Str("Alice")))
     val result = ex.validateRequired("name" -> "string", "score" -> "number")
-    result.left.toOption.get should have length 1
+    (result.left.toOption.get should have).length(1)
   }
 
   it should "collect all errors from multiple missing parameters" in {
     val ex     = SafeParameterExtractor(ujson.Obj())
     val result = ex.validateRequired("a" -> "string", "b" -> "integer", "c" -> "boolean")
-    result.left.toOption.get should have length 3
+    (result.left.toOption.get should have).length(3)
   }
 
   // ---- companion object ----

@@ -187,7 +187,7 @@ class ToolCallErrorJsonSpec extends AnyFlatSpec with Matchers {
     val err  = ToolCallError.InvalidArguments("f", List(ToolParameterError.TypeMismatch("x", "string", "integer")))
     val json = ToolCallErrorJson.toJson(err)
     json("errorType").str shouldBe "invalid_arguments"
-    json("parameterErrors").arr should have length 1
+    (json("parameterErrors").arr should have).length(1)
   }
 
   it should "set errorType=handler_error for HandlerError" in {

@@ -296,6 +296,7 @@ class MCPServer(
       def writeEvent(event: String): Boolean =
         Try { os.write(event.getBytes("UTF-8")); os.flush() }.isSuccess
 
+      // scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordFinally
       try {
         // Per MCP 2024-11-05 spec: first SSE event tells the client where to POST
         if (!writeEvent(s"event: endpoint\ndata: $messageUrl\n\n")) {
@@ -317,6 +318,7 @@ class MCPServer(
         exchange.close()
         logger.info(s"SSE connection closed: sessionId=$sessionId")
       }
+      // scalafix:on
     }
 
     private def handleSSEPost(exchange: HttpExchange): Unit = {

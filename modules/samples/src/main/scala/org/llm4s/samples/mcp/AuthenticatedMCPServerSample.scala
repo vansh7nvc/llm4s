@@ -59,8 +59,8 @@ object AuthenticatedMCPServerSample {
 
   def main(args: Array[String]): Unit = {
     // In production, load this from an environment variable or secrets manager.
-    val apiKey = sys.env.getOrElse("MCP_API_KEY", "my-secret-key-change-me")
-    val port   = sys.env.get("MCP_PORT").flatMap(_.toIntOption).getOrElse(8080)
+    val apiKey = sys.env.getOrElse("MCP_API_KEY", "my-secret-key-change-me") // scalafix:ok NoSysEnv
+    val port   = sys.env.get("MCP_PORT").flatMap(_.toIntOption).getOrElse(8080) // scalafix:ok NoSysEnv
 
     // ── Define tools ────────────────────────────────────────────────────────
 

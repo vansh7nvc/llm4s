@@ -195,7 +195,7 @@ class MCPServerAuthSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll 
       try {
         endpointLatch.await(5, TimeUnit.SECONDS) shouldBe true
         endpointUrl.get() should include("127.0.0.1")
-        endpointUrl.get() should not include "0.0.0.0"
+        (endpointUrl.get() should not).include("0.0.0.0")
       } finally {
         conn.disconnect()
         executor.shutdown()

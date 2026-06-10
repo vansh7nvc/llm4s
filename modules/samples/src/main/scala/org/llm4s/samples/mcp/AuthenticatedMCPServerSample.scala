@@ -70,12 +70,12 @@ object AuthenticatedMCPServerSample {
       schema = Schema
         .`object`[Map[String, Any]]("Echo parameters")
         .withProperty(Schema.property("message", Schema.string("The text to echo")))
-    ).withHandler { (params: SafeParameterExtractor) =>
-      params.getString("message").map(msg => s"Echo: $msg")
-    }.buildSafe().fold(
-      err => throw new RuntimeException(s"Failed to build echo tool: ${err.formatted}"),
-      identity
-    )
+    ).withHandler((params: SafeParameterExtractor) => params.getString("message").map(msg => s"Echo: $msg"))
+      .buildSafe()
+      .fold(
+        err => throw new RuntimeException(s"Failed to build echo tool: ${err.formatted}"),
+        identity
+      )
 
     val reverseTool = ToolBuilder[Map[String, Any], String](
       name = "reverse",
@@ -83,24 +83,24 @@ object AuthenticatedMCPServerSample {
       schema = Schema
         .`object`[Map[String, Any]]("Reverse parameters")
         .withProperty(Schema.property("text", Schema.string("The text to reverse")))
-    ).withHandler { (params: SafeParameterExtractor) =>
-      params.getString("text").map(_.reverse)
-    }.buildSafe().fold(
-      err => throw new RuntimeException(s"Failed to build reverse tool: ${err.formatted}"),
-      identity
-    )
+    ).withHandler((params: SafeParameterExtractor) => params.getString("text").map(_.reverse))
+      .buildSafe()
+      .fold(
+        err => throw new RuntimeException(s"Failed to build reverse tool: ${err.formatted}"),
+        identity
+      )
 
     // ── Start server ─────────────────────────────────────────────────────────
 
     val options = MCPServerOptions(
-      port    = port,
-      path    = "/mcp",
-      name    = "llm4s-demo",
+      port = port,
+      path = "/mcp",
+      name = "llm4s-demo",
       version = "1.0.0",
-      apiKey  = Some(apiKey),
+      apiKey = Some(apiKey),
       // Bind to 0.0.0.0 so both localhost and LAN clients can connect.
       // Safe here because bearer-token auth is enabled above.
-      host    = "0.0.0.0"
+      host = "0.0.0.0"
     )
 
     val server = new MCPServer(options, Seq(echoTool, reverseTool))

@@ -44,8 +44,6 @@ LLM4S provides a simple, robust, and scalable framework for building LLM applica
 
 <br>
 
-> **Note:** This is a work in progress project and is likely to change significantly over time.
-
 ## Why Scala for LLMs?
 
 - **Type Safety**: Catch errors at compile time, not in production.

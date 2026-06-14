@@ -212,15 +212,27 @@ class MCPServerEdgeCasesSpec extends AnyFunSpec with Matchers with BeforeAndAfte
 
   describe("SSE transport - edge cases") {
     it("should use 127.0.0.1 in endpoint URL when server is bound to 0.0.0.0") {
+      // Binding 0.0.0.0 requires an apiKey (start() refuses a public bind otherwise).
+      val key = "wildcard-key"
       val s = new MCPServer(
-        MCPServerOptions(0, "/mcp", "WildcardServer", "1.0", host = "0.0.0.0"),
+        MCPServerOptions(0, "/mcp", "WildcardServer", "1.0", apiKey = Some(key), host = "0.0.0.0"),
         Seq(buildPingTool())
       )
       s.start().fold(e => throw e, _ => ())
       try {
-        val event = readFirstSSEEvent(s.boundPort, "/mcp/sse")
+        val event = readFirstSSEEvent(s.boundPort, "/mcp/sse", Some(key))
         extractMessageUrl(event) should startWith("http://127.0.0.1:")
       } finally s.stop()
+    }
+
+    it("should refuse to start when bound to a non-loopback host without an apiKey") {
+      val s = new MCPServer(
+        MCPServerOptions(0, "/mcp", "InsecureServer", "1.0", host = "0.0.0.0"),
+        Seq(buildPingTool())
+      )
+      val result = s.start()
+      result.isLeft shouldBe true
+      result.left.toOption.map(_.getMessage).getOrElse("") should include("not loopback")
     }
 
     it("should return 202 for a valid SSE notification (no id)") {
@@ -376,13 +388,14 @@ class MCPServerEdgeCasesSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     }
   }
 
-  private def readFirstSSEEvent(serverPort: Int, path: String): String = {
+  private def readFirstSSEEvent(serverPort: Int, path: String, apiKey: Option[String]): String = {
     val c =
       URI.create(s"http://127.0.0.1:$serverPort$path").toURL.openConnection().asInstanceOf[HttpURLConnection]
     c.setRequestMethod("GET")
     c.setConnectTimeout(3000)
     c.setReadTimeout(3000)
     c.setRequestProperty("Accept", "text/event-stream")
+    apiKey.foreach(k => c.setRequestProperty("Authorization", s"Bearer $k"))
     try {
       val reader = new BufferedReader(new InputStreamReader(c.getInputStream, "UTF-8"))
       val sb     = new StringBuilder

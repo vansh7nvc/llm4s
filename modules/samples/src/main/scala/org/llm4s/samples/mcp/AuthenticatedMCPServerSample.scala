@@ -59,8 +59,14 @@ object AuthenticatedMCPServerSample {
 
   def main(args: Array[String]): Unit = {
     // In production, load this from an environment variable or secrets manager.
-    val apiKey = sys.env.getOrElse("MCP_API_KEY", "my-secret-key-change-me")    // scalafix:ok NoSysEnv
-    val port   = sys.env.get("MCP_PORT").flatMap(_.toIntOption).getOrElse(8080) // scalafix:ok NoSysEnv
+    val explicitKey = sys.env.get("MCP_API_KEY")                                     // scalafix:ok NoSysEnv
+    val apiKey      = explicitKey.getOrElse("my-secret-key-change-me")
+    val port        = sys.env.get("MCP_PORT").flatMap(_.toIntOption).getOrElse(8080) // scalafix:ok NoSysEnv
+
+    // Only expose on all interfaces (0.0.0.0) when a real key was supplied via MCP_API_KEY.
+    // With the built-in placeholder key, stay on loopback so the demo can never accidentally
+    // publish a known-key server to the network.
+    val host = if (explicitKey.isDefined) "0.0.0.0" else "127.0.0.1"
 
     // ── Define tools ────────────────────────────────────────────────────────
 
@@ -98,9 +104,8 @@ object AuthenticatedMCPServerSample {
       name = "llm4s-demo",
       version = "1.0.0",
       apiKey = Some(apiKey),
-      // Bind to 0.0.0.0 so both localhost and LAN clients can connect.
-      // Safe here because bearer-token auth is enabled above.
-      host = "0.0.0.0"
+      // 0.0.0.0 (LAN-accessible) only when a real key is set via MCP_API_KEY; otherwise loopback.
+      host = host
     )
 
     val server = new MCPServer(options, Seq(echoTool, reverseTool))
@@ -110,10 +115,10 @@ object AuthenticatedMCPServerSample {
         logger.error(s"Failed to start MCP server: ${err.getMessage}", err)
         sys.exit(1)
       case Right(_) =>
-        logger.info(s"MCP server started on port $port")
-        logger.info("Streamable HTTP (2025-06-18): POST http://127.0.0.1:{port}/mcp")
-        logger.info("SSE transport   (2024-11-05): GET  http://127.0.0.1:{port}/mcp/sse")
-        logger.info("Claude Desktop config:  url = http://127.0.0.1:{port}/mcp/sse")
+        logger.info(s"MCP server started on $host:$port")
+        logger.info(s"Streamable HTTP (2025-06-18): POST http://127.0.0.1:$port/mcp")
+        logger.info(s"SSE transport   (2024-11-05): GET  http://127.0.0.1:$port/mcp/sse")
+        logger.info(s"Claude Desktop config:  url = http://127.0.0.1:$port/mcp/sse")
         logger.info(s"API key (set MCP_API_KEY env to override): $apiKey")
     }
 

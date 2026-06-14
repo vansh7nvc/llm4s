@@ -7,8 +7,17 @@ import ujson.Obj
 import upickle.default.{ read => upickleRead, write => upickleWrite }
 
 import java.net.InetSocketAddress
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.util.UUID
-import java.util.concurrent.{ ConcurrentHashMap, Executors, ExecutorService, LinkedBlockingQueue, TimeUnit }
+import java.util.concurrent.{
+  ConcurrentHashMap,
+  ExecutorService,
+  LinkedBlockingQueue,
+  SynchronousQueue,
+  ThreadPoolExecutor,
+  TimeUnit
+}
 
 import scala.collection.concurrent.TrieMap
 import scala.util.{ Failure, Success, Try, Using }
@@ -25,7 +34,8 @@ import scala.util.{ Failure, Success, Try, Using }
  *                Configuring an API key removes the development-only security
  *                warning and allows binding to non-localhost interfaces via `host`.
  * @param host    Network interface to bind to (default "127.0.0.1").
- *                Change to "0.0.0.0" (or a specific IP) only when `apiKey` is set.
+ *                Change to "0.0.0.0" (or a specific IP) only when `apiKey` is set;
+ *                `start()` refuses to bind a non-loopback host without an `apiKey`.
  */
 case class MCPServerOptions(
   port: Int,
@@ -48,8 +58,15 @@ case class MCPServerOptions(
  * === Authentication ===
  * Set `MCPServerOptions.apiKey` to enable Bearer-token authentication.  When set,
  * every HTTP request must include `Authorization: Bearer <key>`; unauthenticated
- * requests receive HTTP 401.  Without an API key the server binds only to
- * `127.0.0.1` and logs a warning that it is for local development only.
+ * requests receive HTTP 401.  Without an API key the server logs a development-only
+ * security warning, and `start()` refuses to bind to a non-loopback `host` (returning
+ * a `Left`) so an unauthenticated server is never exposed to the network.
+ *
+ * === Concurrency ===
+ * Connections are served by an elastic, bounded thread pool capped at
+ * [[MCPServer.MaxServerThreads]] threads (shared across long-lived SSE streams and
+ * short Streamable HTTP requests).  Beyond that ceiling new connections are rejected
+ * until capacity frees up, providing backpressure under load.
  *
  * {{{
  * val tools   = Seq(myTool1, myTool2)
@@ -87,6 +104,15 @@ class MCPServer(
       return Right(())
     }
 
+    if (options.apiKey.isEmpty && !isLoopbackHost(options.host)) {
+      val msg =
+        s"Refusing to start MCPServer: host '${options.host}' is not loopback but no apiKey is configured. " +
+          "Binding a public interface without authentication would expose all tools to the network. " +
+          "Set MCPServerOptions.apiKey to enable bearer-token authentication, or bind to 127.0.0.1."
+      logger.error(msg)
+      return Left(new IllegalStateException(msg))
+    }
+
     if (options.apiKey.isDefined) {
       logger.info("MCPServer starting with API key authentication enabled")
     } else {
@@ -98,8 +124,16 @@ class MCPServer(
     Try {
       val httpServer = HttpServer.create(new InetSocketAddress(options.host, options.port), 0)
       httpServer.createContext(options.path, new MCPHandler)
-      // Use a cached thread pool to support long-lived SSE connections alongside short HTTP requests
-      executorService = Executors.newCachedThreadPool()
+      // Bounded elastic pool: threads are created on demand (like a cached pool, so long-lived
+      // SSE GET connections never starve short Streamable HTTP requests) but capped at
+      // MaxServerThreads so the pool retains a backpressure ceiling under many concurrent connections.
+      executorService = new ThreadPoolExecutor(
+        0,
+        MCPServer.MaxServerThreads,
+        60L,
+        TimeUnit.SECONDS,
+        new SynchronousQueue[Runnable]()
+      )
       httpServer.setExecutor(executorService)
       httpServer.start()
       server = Some(httpServer)
@@ -112,6 +146,13 @@ class MCPServer(
       e
     }
   }
+
+  // A non-loopback host without an apiKey would expose all tools to the network, so start() rejects it.
+  private def isLoopbackHost(host: String): Boolean =
+    host == "127.0.0.1" ||
+      host == "::1" ||
+      host == "0:0:0:0:0:0:0:1" ||
+      host.equalsIgnoreCase("localhost")
 
   def stop(delay: Int = 0): Unit = synchronized {
     server.foreach { s =>
@@ -270,7 +311,11 @@ class MCPServer(
             .exists { header =>
               header.length > 7 &&
               header.substring(0, 7).equalsIgnoreCase("Bearer ") &&
-              header.substring(7) == key
+              // Constant-time comparison: avoids leaking the key via response-timing side-channels.
+              MessageDigest.isEqual(
+                header.substring(7).getBytes(StandardCharsets.UTF_8),
+                key.getBytes(StandardCharsets.UTF_8)
+              )
             }
       }
 
@@ -297,6 +342,10 @@ class MCPServer(
         Try { os.write(event.getBytes("UTF-8")); os.flush() }.isSuccess
 
       // scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordFinally
+      // Manual try/finally (not Using) because the "resource" is the long-lived streaming loop
+      // below: cleanup must run when the poll loop exits normally OR the client disconnects
+      // mid-stream, which does not fit Using's single-expression scope. Suppression is limited to
+      // this handler.
       try {
         // Per MCP 2024-11-05 spec: first SSE event tells the client where to POST
         if (!writeEvent(s"event: endpoint\ndata: $messageUrl\n\n")) {
@@ -569,4 +618,14 @@ class MCPServer(
         else Success(out.toString("UTF-8"))
       }.flatten
   }
+}
+
+object MCPServer {
+
+  /**
+   * Maximum number of threads (and therefore concurrent connections) the server will service.
+   * Threads are created on demand and reaped after 60s idle; beyond this ceiling new connections
+   * are rejected until capacity frees up. Long-lived SSE streams each occupy one thread.
+   */
+  val MaxServerThreads: Int = 256
 }

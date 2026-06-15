@@ -6,7 +6,57 @@ Thank you for your interest in contributing to LLM4S!
 
 This project follows our [Code of Conduct](CODE_OF_CONDUCT.md). By participating, you agree to uphold these standards.
 
-## Quick Start
+## Getting Started as a Contributor
+
+### 1. Prerequisites checklist
+- [ ] JDK 21+ installed (`java -version`)
+- [ ] sbt 1.9+ installed (`sbt -version`)
+- [ ] Git configured with your name and email
+- [ ] Fork and clone the repo
+
+### 2. First build
+```bash
+git clone https://github.com/YOUR-USERNAME/llm4s.git
+cd llm4s
+sbt compile       # should succeed in ~3 minutes first time
+sbt core/test     # run just the unit tests (no API keys needed)
+```
+
+### 3. Install the pre-commit hook
+```bash
+./hooks/install.sh
+```
+
+### 4. Your first change (5-minute exercise)
+Point to a "good first issue" and show the workflow:
+```bash
+git checkout -b my-first-contribution
+# make the change
+sbt scalafmtAll   # format
+sbt core/test     # verify
+git commit -m "Add tests for XYZ"
+git push origin my-first-contribution
+# Open PR against main
+```
+
+### 5. How to run a specific test
+```bash
+sbt "core/testOnly *PIIDetectorSpec"
+```
+
+### 6. How to run a sample
+```bash
+export LLM_MODEL=openai/gpt-4o
+export OPENAI_API_KEY=sk-...
+sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
+```
+
+### 7. Where to ask for help
+- **Discord:** [Join the community](https://discord.gg/4uvTPn6qww)
+- **Discussions:** [GitHub Discussions](https://github.com/llm4s/llm4s/discussions)
+- **Dev Hour:** We host a contributor dev hour on Discord every Tuesday at 17:00 UTC.
+
+## Pull Request Workflow
 
 1. **Read the docs:**
    - [AGENTS.md](AGENTS.md) - Repository structure, build commands, and testing
@@ -17,23 +67,7 @@ This project follows our [Code of Conduct](CODE_OF_CONDUCT.md). By participating
    - Use [issue templates](https://github.com/llm4s/llm4s/issues/new/choose) for bugs, features, or enhancements
    - Wait for maintainer feedback before coding
 
-3. **Fork and setup:**
-   ```bash
-   # Fork on GitHub, then clone
-   git clone https://github.com/YOUR-USERNAME/llm4s.git
-   cd llm4s
-   git remote add upstream https://github.com/llm4s/llm4s.git
-   
-   # Install pre-commit hook
-   ./hooks/install.sh
-   ```
-
-4. **Create a branch:**
-   ```bash
-   git checkout -b feature/your-feature-name
-   ```
-
-5. **Make your changes:**
+3. **Make your changes:**
    - Follow code conventions in [CLAUDE.md](CLAUDE.md)
    - Use `Result[A]` for errors (not exceptions)
    - Configure at app edge only (see [AGENTS.md](AGENTS.md#configuration-boundary))
@@ -41,7 +75,7 @@ This project follows our [Code of Conduct](CODE_OF_CONDUCT.md). By participating
    - Run `sbt scalafixAll` to catch boundary and syntax violations early
    - Run `sbt scalafmtAll` before committing
 
-6. **Test thoroughly:**
+4. **Test thoroughly:**
    ```bash
    sbt scalafixAll        # Run scalafix checks (enforced in CI/compile)
    sbt scalafmtAll        # Format code
@@ -50,7 +84,7 @@ This project follows our [Code of Conduct](CODE_OF_CONDUCT.md). By participating
    sbt buildAll           # Full pipeline check
    ```
 
-7. **Submit PR:**
+5. **Submit PR:**
    - Write clear title: `[FEATURE]`, `[BUG FIX]`, `[DOCS]`, etc.
    - Describe what changed and why
    - Reference related issues: `Fixes #123`

@@ -436,6 +436,138 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers {
     )
   }
 
+  // ============ Non-Blocking Retry Delay (Issue #1066) ============
+
+  it should "succeed after non-blocking backoff delay (functional parity with Thread.sleep)" in {
+    createFlakyTool(2).fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      flakyTool => {
+        val registry = new ToolRegistry(Seq(flakyTool))
+        val config = ToolExecutionConfig(
+          retryPolicy = Some(ToolRetryPolicy(maxAttempts = 3, baseDelay = 50.millis, backoffFactor = 2.0))
+        )
+        val request = ToolCallRequest("flaky", ujson.Obj("x" -> 7.0))
+        val result  = registry.execute(request, config)
+        result.isRight shouldBe true
+        result.toOption.get("result").num shouldBe 7.0
+      }
+    )
+  }
+
+  it should "wait approximately the configured backoff delay between retries" in {
+    createFlakyTool(1).fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      flakyTool => {
+        val registry  = new ToolRegistry(Seq(flakyTool))
+        val baseDelay = 300.millis
+        val config = ToolExecutionConfig(
+          retryPolicy = Some(ToolRetryPolicy(maxAttempts = 2, baseDelay = baseDelay, backoffFactor = 1.0))
+        )
+        val request = ToolCallRequest("flaky", ujson.Obj("x" -> 5.0))
+        val start   = System.currentTimeMillis()
+        val result  = registry.execute(request, config)
+        val elapsed = System.currentTimeMillis() - start
+
+        result.isRight shouldBe true
+        // Should have waited at least baseDelay (50ms tolerance for scheduling overhead)
+        elapsed should be >= (baseDelay.toMillis - 50)
+      }
+    )
+  }
+
+  it should "apply exponential backoff factor correctly across multiple retries" in {
+    val callCount = new java.util.concurrent.atomic.AtomicInteger(0)
+    val schema = Schema
+      .`object`[Map[String, Any]]("Tracked tool")
+      .withProperty(Schema.property("x", Schema.number("Value")))
+    val trackedTool = ToolBuilder[Map[String, Any], MathResult](
+      "tracked",
+      "Fails 3 times then succeeds",
+      schema
+    ).withHandler { extractor =>
+      for { x <- extractor.getDouble("x") } yield {
+        if (callCount.getAndIncrement() < 3) throw new java.io.IOException("transient")
+        MathResult(x)
+      }
+    }.buildSafe()
+
+    trackedTool.fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tool => {
+        val registry = new ToolRegistry(Seq(tool))
+        val config = ToolExecutionConfig(
+          retryPolicy = Some(ToolRetryPolicy(maxAttempts = 4, baseDelay = 50.millis, backoffFactor = 2.0))
+        )
+        val result = registry.execute(ToolCallRequest("tracked", ujson.Obj("x" -> 1.0)), config)
+        // 3 failures then success on 4th attempt
+        result.isRight shouldBe true
+        result.toOption.get("result").num shouldBe 1.0
+        callCount.get() shouldBe 4
+      }
+    )
+  }
+
+  it should "exit immediately on non-retryable error without applying any backoff delay" in {
+    createFailingTool().fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      failTool => {
+        val registry = new ToolRegistry(Seq(failTool))
+        val config = ToolExecutionConfig(
+          retryPolicy = Some(ToolRetryPolicy(maxAttempts = 3, baseDelay = 5.seconds))
+        )
+        val request = ToolCallRequest("fail", ujson.Obj("x" -> 1.0))
+        val start   = System.currentTimeMillis()
+        val result  = registry.execute(request, config)
+        val elapsed = System.currentTimeMillis() - start
+
+        result.isLeft shouldBe true
+        result.left.toOption.get shouldBe a[ToolCallError.HandlerError]
+        // HandlerError is non-retryable — must exit fast, no 5s delay applied
+        elapsed should be < 1000L
+      }
+    )
+  }
+
+  "ToolRegistry.executeAll with retry" should "handle many concurrent retries without blocking the thread pool" in {
+    val result = for {
+      addTool   <- createAddTool()
+      flakyTool <- createFlakyTool(1)
+    } yield {
+      val addRegistry   = new ToolRegistry(Seq(addTool))
+      val flakyRegistry = new ToolRegistry(Seq(flakyTool))
+      val config = ToolExecutionConfig(
+        retryPolicy = Some(ToolRetryPolicy(maxAttempts = 2, baseDelay = 200.millis, backoffFactor = 1.0))
+      )
+
+      // Run 4 independent flaky-tool retries concurrently alongside fast add calls
+      val flakyFutures = (1 to 4).map { _ =>
+        Future(flakyRegistry.execute(ToolCallRequest("flaky", ujson.Obj("x" -> 42.0)), config))
+      }
+      val addFutures = (1 to 4).map { i =>
+        Future(addRegistry.execute(ToolCallRequest("add", ujson.Obj("a" -> i.toDouble, "b" -> i.toDouble))))
+      }
+
+      val start       = System.currentTimeMillis()
+      val flakyResult = Await.result(Future.sequence(flakyFutures), 10.seconds)
+      val addResult   = Await.result(Future.sequence(addFutures), 10.seconds)
+      val elapsed     = System.currentTimeMillis() - start
+
+      // All flaky tools should succeed on retry
+      flakyResult.foreach { r =>
+        r.isRight shouldBe true
+        r.toOption.get("result").num shouldBe 42.0
+      }
+      // All add tools should succeed immediately
+      addResult.zipWithIndex.foreach { case (r, i) =>
+        r.isRight shouldBe true
+        r.toOption.get("result").num shouldBe ((i + 1) * 2).toDouble
+      }
+      // Sanity: everything finishes in well under 10s
+      elapsed should be < 8000L
+    }
+    result.left.foreach(e => fail(s"Setup failed: ${e.formatted}"))
+  }
+
   "ToolRegistry.executeAll with timeout" should "complete batch when one tool times out and others succeed" in {
     createAddTool().fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),

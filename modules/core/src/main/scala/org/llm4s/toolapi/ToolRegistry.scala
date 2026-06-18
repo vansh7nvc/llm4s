@@ -115,6 +115,27 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
       case None => Left(ToolCallError.UnknownFunction(request.functionName))
     }
 
+  /**
+   * Waits for `delayMs` milliseconds without parking a thread.
+   *
+   * Uses the shared [[ToolRegistry.timeoutScheduler]] to schedule a one-shot
+   * callback that completes a [[scala.concurrent.Promise]]. The calling thread is
+   * released back to the [[ExecutionContext]] pool during the wait, unlike
+   * `Thread.sleep` which holds the thread hostage for the full delay.
+   *
+   * A guard timeout of `delayMs + 500ms` is passed to `Await.result` so this
+   * method can never block indefinitely even if the scheduler misfires.
+   */
+  private def nonBlockingDelay(delayMs: Long)(implicit ec: ExecutionContext): Unit = {
+    val p = Promise[Unit]()
+    ToolRegistry.timeoutScheduler.schedule(
+      new Runnable { override def run(): Unit = p.success(()) },
+      delayMs,
+      TimeUnit.MILLISECONDS
+    )
+    Await.result(p.future, (delayMs + 500).millis)
+  }
+
   private def runWithRetry(
     request: ToolCallRequest,
     config: ToolExecutionConfig
@@ -136,9 +157,7 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
               val delayMs =
                 (policy.baseDelay.toMillis * math.pow(policy.backoffFactor, (attempt - 1).toDouble)).toLong
               if (delayMs > 0) {
-                blocking {
-                  Thread.sleep(delayMs)
-                }
+                nonBlockingDelay(delayMs) // frees thread during backoff — no Thread.sleep
               }
             case _ => return lastResult
           }

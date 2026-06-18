@@ -32,8 +32,9 @@ import org.slf4j.LoggerFactory
  *
  * ==Cost==
  *
- * Each call to [[squeezeDigest]] that needs to act makes one LLM API call per
- * `[HISTORY_SUMMARY]` message that exceeds the cap. Budget for this accordingly.
+ * When the combined size of all `[HISTORY_SUMMARY]` messages exceeds the cap,
+ * [[squeezeDigest]] makes one LLM API call per `[HISTORY_SUMMARY]` message (the cap
+ * is a combined budget, not a per-message threshold). Budget for this accordingly.
  *
  * ==Pipeline Position==
  *

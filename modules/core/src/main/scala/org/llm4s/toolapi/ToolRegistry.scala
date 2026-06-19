@@ -179,7 +179,8 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
         val runFuture = Future {
           workerThread = Thread.currentThread()
           try blocking(runOneAttempt(request))
-          finally Thread.interrupted() // read-and-clear: don't return a dirty thread to the pool
+          finally
+            Thread.interrupted() // read-and-clear: don't return a dirty thread to the pool
         }
 
         val scheduled = ToolRegistry.timeoutScheduler.schedule(

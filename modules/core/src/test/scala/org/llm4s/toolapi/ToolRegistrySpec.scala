@@ -448,9 +448,9 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers {
       "Blocks until interrupted",
       schema
     ).withHandler { _ =>
-      try {
+      try
         Thread.sleep(10_000) // will be interrupted by timeout
-      } catch {
+      catch {
         case _: InterruptedException => interruptReceived.set(true)
       }
       Right(MathResult(0.0))
@@ -483,9 +483,9 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers {
       "Completes quickly",
       schema
     ).withHandler { _ =>
-      try {
+      try
         Thread.sleep(50) // well within timeout
-      } catch {
+      catch {
         case _: InterruptedException => interruptReceived.set(true)
       }
       Right(MathResult(42.0))
@@ -551,7 +551,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers {
       tool => {
         val registry = new ToolRegistry(Seq(tool))
         val config = ToolExecutionConfig(
-          timeout     = Some(200.millis),
+          timeout = Some(200.millis),
           retryPolicy = Some(ToolRetryPolicy(maxAttempts = 2, baseDelay = 50.millis))
         )
         val request = ToolCallRequest("slowfirst", ujson.Obj("x" -> 99.0))
@@ -574,7 +574,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers {
       "Hangs indefinitely",
       schema
     ).withHandler { _ =>
-      try { Thread.sleep(30_000) }
+      try Thread.sleep(30_000)
       catch { case _: InterruptedException => () }
       Right(MathResult(0.0))
     }.buildSafe()
@@ -591,7 +591,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers {
             val requests = (1 to 5).flatMap { i =>
               Seq(
                 ToolCallRequest("blocker", ujson.Obj("ms" -> 30_000)),
-                ToolCallRequest("add", ujson.Obj("a"  -> i.toDouble, "b" -> i.toDouble))
+                ToolCallRequest("add", ujson.Obj("a" -> i.toDouble, "b" -> i.toDouble))
               )
             }
             val future  = registry.executeAll(requests, ToolExecutionStrategy.Parallel, config)

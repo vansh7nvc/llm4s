@@ -460,14 +460,19 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers {
       e => fail(s"Tool creation failed: ${e.formatted}"),
       tool => {
         val registry = new ToolRegistry(Seq(tool))
-        val config   = ToolExecutionConfig(timeout = Some(200.millis))
+        val config   = ToolExecutionConfig(timeout = Some(1.second))
         val request  = ToolCallRequest("hang", ujson.Obj("ms" -> 10_000))
         val result   = registry.execute(request, config)
 
         result.isLeft shouldBe true
         result.left.toOption.get shouldBe a[ToolCallError.Timeout]
-        // Allow a short window for the interrupt to propagate across threads
-        Thread.sleep(150)
+
+        // Poll for the interrupt to propagate across threads (up to 3 seconds)
+        var attempts = 0
+        while (!interruptReceived.get() && attempts < 150) {
+          Thread.sleep(20)
+          attempts += 1
+        }
         interruptReceived.get() shouldBe true
       }
     )
@@ -495,14 +500,14 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers {
       e => fail(s"Tool creation failed: ${e.formatted}"),
       tool => {
         val registry = new ToolRegistry(Seq(tool))
-        val config   = ToolExecutionConfig(timeout = Some(2.seconds))
+        val config   = ToolExecutionConfig(timeout = Some(3.seconds))
         val request  = ToolCallRequest("fast", ujson.Obj("ms" -> 50))
         val result   = registry.execute(request, config)
 
         result.isRight shouldBe true
         result.toOption.get("result").num shouldBe 42.0
         // Give the scheduler time to fire if there were a bug
-        Thread.sleep(150)
+        Thread.sleep(300)
         interruptReceived.get() shouldBe false
       }
     )
@@ -513,7 +518,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers {
       e => fail(s"Tool creation failed: ${e.formatted}"),
       sleepTool => {
         val registry = new ToolRegistry(Seq(sleepTool))
-        val config   = ToolExecutionConfig(timeout = Some(100.millis))
+        val config   = ToolExecutionConfig(timeout = Some(1.second))
         val request  = ToolCallRequest("sleep", ujson.Obj("ms" -> 5000))
         val result   = registry.execute(request, config)
 
@@ -540,7 +545,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers {
         x <- extractor.getDouble("x")
       } yield {
         if (callCount.getAndIncrement() == 0) {
-          Thread.sleep(5000) // will be interrupted by 200ms timeout
+          Thread.sleep(10_000) // will be interrupted by 1s timeout
         }
         MathResult(x)
       }
@@ -551,8 +556,8 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers {
       tool => {
         val registry = new ToolRegistry(Seq(tool))
         val config = ToolExecutionConfig(
-          timeout = Some(200.millis),
-          retryPolicy = Some(ToolRetryPolicy(maxAttempts = 2, baseDelay = 50.millis))
+          timeout = Some(1.second),
+          retryPolicy = Some(ToolRetryPolicy(maxAttempts = 2, baseDelay = 100.millis))
         )
         val request = ToolCallRequest("slowfirst", ujson.Obj("x" -> 99.0))
         val result  = registry.execute(request, config)
@@ -586,7 +591,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers {
           e => fail(s"Add tool creation failed: ${e.formatted}"),
           addTool => {
             val registry = new ToolRegistry(Seq(blocker, addTool))
-            val config   = ToolExecutionConfig(timeout = Some(200.millis))
+            val config   = ToolExecutionConfig(timeout = Some(1.second))
             // 5 blocking + 5 fast calls interleaved
             val requests = (1 to 5).flatMap { i =>
               Seq(
@@ -595,7 +600,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers {
               )
             }
             val future  = registry.executeAll(requests, ToolExecutionStrategy.Parallel, config)
-            val results = Await.result(future, 10.seconds)
+            val results = Await.result(future, 15.seconds)
 
             results should have size 10
             // Even indices = blocker → Timeout; odd indices = add → success

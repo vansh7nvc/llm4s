@@ -608,7 +608,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers {
               case (r, i) if i % 2 == 0 =>
                 r.isLeft shouldBe true
                 r.left.toOption.get shouldBe a[ToolCallError.Timeout]
-              case (r, i) if i % 2 == 1 =>
+              case (r, i) =>
                 r.isRight shouldBe true
                 val expected = ((i / 2) + 1).toDouble * 2
                 r.toOption.get("result").num shouldBe expected

@@ -178,9 +178,12 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
 
         val runFuture = Future {
           workerThread = Thread.currentThread()
-          try blocking(runOneAttempt(request))
-          finally
-            Thread.interrupted() // read-and-clear: don't return a dirty thread to the pool
+          val resultOrEx =
+            scala.util.control.Exception.nonFatalCatch.either(blocking(runOneAttempt(request)))
+          // Clear interrupt status before returning the thread to the pool.
+          Thread.interrupted()
+          // Re-throw non-fatal exceptions, or return the successful result.
+          resultOrEx.fold(throw _, identity)
         }
 
         val scheduled = ToolRegistry.timeoutScheduler.schedule(

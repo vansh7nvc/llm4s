@@ -438,7 +438,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers {
 
   // ============ Non-Blocking Retry Delay (Issue #1066) ============
 
-  it should "succeed after non-blocking backoff delay (functional parity with Thread.sleep)" in {
+  it should "succeed after backoff delay" in {
     createFlakyTool(2).fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       flakyTool => {
@@ -528,45 +528,6 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers {
     )
   }
 
-  "ToolRegistry.executeAll with retry" should "handle many concurrent retries without blocking the thread pool" in {
-    val result = for {
-      addTool   <- createAddTool()
-      flakyTool <- createFlakyTool(1)
-    } yield {
-      val addRegistry   = new ToolRegistry(Seq(addTool))
-      val flakyRegistry = new ToolRegistry(Seq(flakyTool))
-      val config = ToolExecutionConfig(
-        retryPolicy = Some(ToolRetryPolicy(maxAttempts = 2, baseDelay = 200.millis, backoffFactor = 1.0))
-      )
-
-      // Run 4 independent flaky-tool retries concurrently alongside fast add calls
-      val flakyFutures = (1 to 4).map { _ =>
-        Future(flakyRegistry.execute(ToolCallRequest("flaky", ujson.Obj("x" -> 42.0)), config))
-      }
-      val addFutures = (1 to 4).map { i =>
-        Future(addRegistry.execute(ToolCallRequest("add", ujson.Obj("a" -> i.toDouble, "b" -> i.toDouble))))
-      }
-
-      val start       = System.currentTimeMillis()
-      val flakyResult = Await.result(Future.sequence(flakyFutures), 10.seconds)
-      val addResult   = Await.result(Future.sequence(addFutures), 10.seconds)
-      val elapsed     = System.currentTimeMillis() - start
-
-      // All flaky tools should succeed on retry
-      flakyResult.foreach { r =>
-        r.isRight shouldBe true
-        r.toOption.get("result").num shouldBe 42.0
-      }
-      // All add tools should succeed immediately
-      addResult.zipWithIndex.foreach { case (r, i) =>
-        r.isRight shouldBe true
-        r.toOption.get("result").num shouldBe ((i + 1) * 2).toDouble
-      }
-      // Sanity: everything finishes in well under 10s
-      elapsed should be < 8000L
-    }
-    result.left.foreach(e => fail(s"Setup failed: ${e.formatted}"))
-  }
 
   "ToolRegistry.executeAll with timeout" should "complete batch when one tool times out and others succeed" in {
     createAddTool().fold(

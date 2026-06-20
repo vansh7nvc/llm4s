@@ -166,7 +166,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers {
     )
   }
 
-  it should "return error for unknown function" in {
+  it should "return error for unknown function and suggest available tools" in {
     createAddTool().fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       addTool => {
@@ -174,9 +174,10 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers {
         val request  = ToolCallRequest("unknown_function", ujson.Obj())
         val result   = registry.execute(request)
         result.isLeft shouldBe true
-        result.fold(identity, v => fail(s"Expected Left but got Right: $v")).getMessage should include(
-          "not a recognized tool"
-        )
+        val errorMsg = result.fold(identity, v => fail(s"Expected Left but got Right: $v")).getMessage
+        errorMsg should include("not a recognized tool")
+        errorMsg should include("Available tools: [add]")
+        errorMsg should include("case-sensitive")
       }
     )
   }

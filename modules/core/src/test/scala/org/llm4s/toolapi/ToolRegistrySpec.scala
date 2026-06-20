@@ -528,7 +528,6 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers {
     )
   }
 
-
   "ToolRegistry.executeAll with timeout" should "complete batch when one tool times out and others succeed" in {
     createAddTool().fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),

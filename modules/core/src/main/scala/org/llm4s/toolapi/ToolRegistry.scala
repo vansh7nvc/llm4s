@@ -115,8 +115,6 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
       case None => Left(ToolCallError.UnknownFunction(request.functionName))
     }
 
-
-
   private def runWithRetry(
     request: ToolCallRequest,
     config: ToolExecutionConfig

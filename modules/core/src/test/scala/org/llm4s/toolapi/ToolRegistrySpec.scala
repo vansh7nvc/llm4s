@@ -436,7 +436,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers {
     )
   }
 
-  // ============ Non-Blocking Retry Delay (Issue #1066) ============
+  // ============ Retry Backoff Delay Coverage (relates to #1066) ============
 
   it should "succeed after backoff delay" in {
     createFlakyTool(2).fold(

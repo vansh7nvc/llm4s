@@ -160,16 +160,12 @@ private[llm4s] object NamedProviderValidators:
         if requireBaseUrl && section.baseUrl.map(_.trim).forall(_.isEmpty) then
           val exampleUrl = providerKind match
             case ProviderKind.Ollama => "e.g. http://localhost:11434"
-            case ProviderKind.Azure  => "e.g. https://my-resource.openai.azure.com/"
             case _                   => "e.g. https://api.example.com/"
 
-          val envVar = if (providerKind == ProviderKind.Azure) "AZURE_OPENAI_BASE_URL" else s"${envPrefix}_BASE_URL"
-          missingFields += s"  - baseUrl: set $envVar ($exampleUrl)"
+          missingFields += s"  - baseUrl: set ${envPrefix}_BASE_URL ($exampleUrl)"
 
         if requireEndpoint && section.endpoint.map(_.trim).forall(_.isEmpty) then
-          val exampleMsg =
-            if (providerKind == ProviderKind.Azure) "the model deployment name in your Azure OpenAI resource"
-            else s"the model endpoint/deployment name in your $providerDisplayName resource"
+          val exampleMsg = "the model endpoint/deployment name in your Azure OpenAI resource"
           missingFields += s"  - endpoint: $exampleMsg"
 
         val errors = missingFields.result()

@@ -316,7 +316,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
         )
       ) match
         case Left(err) =>
-          err.message should include("- endpoint: the model deployment name in your Azure OpenAI resource")
+          err.message should include("- endpoint: the model endpoint/deployment name in your Azure OpenAI resource")
         case Right(cfg) =>
           fail(s"Expected missing Azure endpoint failure, got config: $cfg")
     }

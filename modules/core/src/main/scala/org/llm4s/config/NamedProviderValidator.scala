@@ -46,7 +46,6 @@ private[llm4s] object NamedProviderValidators:
         providerKind = ProviderKind.Azure,
         section = section,
         requireApiKey = true,
-        requireBaseUrl = true,
         requireEndpoint = true,
       )
 

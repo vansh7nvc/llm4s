@@ -27,7 +27,6 @@ class NamedProviderValidatorSpec extends AnyFlatSpec with Matchers {
     err.message should include(
       "- apiKey: set AZURE_API_KEY or provide it in llm4s.conf under providers.my-azure.apiKey"
     )
-    err.message should include("- baseUrl: set AZURE_OPENAI_BASE_URL (e.g. https://my-resource.openai.azure.com/)")
     err.message should include("- endpoint: the model deployment name in your Azure OpenAI resource")
   }
 

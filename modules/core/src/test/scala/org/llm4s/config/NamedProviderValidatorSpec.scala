@@ -101,4 +101,24 @@ class NamedProviderValidatorSpec extends AnyFlatSpec with Matchers {
     // "OPENAI_BASE_URL" is generated because we passed ProviderKind.OpenAI
     err.message should include("- baseUrl: set OPENAI_BASE_URL (e.g. https://api.example.com/)")
   }
+
+  "validateNamedProviderConfig" should "return Right(normalized) when all required fields are present" in {
+    val section = RawNamedProviderSection(
+      provider = Some("openai"),
+      model = Some("gpt-4"),
+      baseUrl = Some("https://api.openai.com/v1"),
+      apiKey = Some("sk-test-key"),
+      organization = None,
+      endpoint = None,
+      apiVersion = None
+    )
+
+    val result = NamedProviderValidators.OpenAI.validate(ProviderName("my-openai"), section)
+
+    result.isRight shouldBe true
+    val config = result.getOrElse(fail("Expected Right"))
+    config.provider shouldBe ProviderKind.OpenAI
+    config.apiKey shouldBe Some("sk-test-key")
+    config.baseUrl shouldBe Some("https://api.openai.com/v1")
+  }
 }

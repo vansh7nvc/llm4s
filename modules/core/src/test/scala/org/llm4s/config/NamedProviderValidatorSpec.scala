@@ -144,7 +144,7 @@ class NamedProviderValidatorSpec extends AnyFlatSpec with Matchers {
     config.baseUrl shouldBe Some("https://api.example.com")
     config.apiKey shouldBe Some("sk-test-key")
     config.organization shouldBe Some("org-123")
-    config.endpoint shouldBe None // should be filtered out because it's just whitespace
+    config.endpoint shouldBe None   // should be filtered out because it's just whitespace
     config.apiVersion shouldBe None // should be filtered out because it's empty
   }
 

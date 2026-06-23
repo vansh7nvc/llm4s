@@ -80,22 +80,24 @@ class NamedProviderValidatorSpec extends AnyFlatSpec with Matchers {
       endpoint = None,
       apiVersion = None
     )
-    
+
     object GenericTestValidator extends NamedProviderValidator {
-      def validate(providerName: ProviderName, section: RawNamedProviderSection): org.llm4s.types.Result[NamedProviderConfig] = {
+      def validate(
+        providerName: ProviderName,
+        section: RawNamedProviderSection
+      ): org.llm4s.types.Result[NamedProviderConfig] =
         NamedProviderValidators.validateNamedProviderConfig(
           providerName = providerName,
           providerKind = ProviderKind.OpenAI, // non-Ollama to hit the `case _` branch
           section = section,
           requireBaseUrl = true
         )
-      }
     }
-    
+
     val result = GenericTestValidator.validate(ProviderName("my-generic"), section)
     result.isLeft shouldBe true
     val err = result.left.toOption.get.asInstanceOf[ConfigurationError]
-    
+
     // "OPENAI_BASE_URL" is generated because we passed ProviderKind.OpenAI
     err.message should include("- baseUrl: set OPENAI_BASE_URL (e.g. https://api.example.com/)")
   }

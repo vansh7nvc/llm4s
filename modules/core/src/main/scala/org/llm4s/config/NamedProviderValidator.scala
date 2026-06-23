@@ -133,7 +133,7 @@ private[llm4s] object NamedProviderValidators:
         requireApiKey = true,
       )
 
-  private def validateNamedProviderConfig(
+  private[config] def validateNamedProviderConfig(
     providerName: ProviderName,
     providerKind: ProviderKind,
     section: RawNamedProviderSection,

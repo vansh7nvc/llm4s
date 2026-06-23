@@ -69,4 +69,34 @@ class NamedProviderValidatorSpec extends AnyFlatSpec with Matchers {
     err.message should include("Ollama provider 'my-ollama' is missing required fields")
     err.message should include("- baseUrl: set OLLAMA_BASE_URL (e.g. http://localhost:11434)")
   }
+
+  "validateNamedProviderConfig" should "mention missing generic fields using default examples" in {
+    val section = RawNamedProviderSection(
+      provider = Some("openai"),
+      model = Some("test-model"),
+      baseUrl = None,
+      apiKey = None,
+      organization = None,
+      endpoint = None,
+      apiVersion = None
+    )
+    
+    object GenericTestValidator extends NamedProviderValidator {
+      def validate(providerName: ProviderName, section: RawNamedProviderSection): org.llm4s.types.Result[NamedProviderConfig] = {
+        NamedProviderValidators.validateNamedProviderConfig(
+          providerName = providerName,
+          providerKind = ProviderKind.OpenAI, // non-Ollama to hit the `case _` branch
+          section = section,
+          requireBaseUrl = true
+        )
+      }
+    }
+    
+    val result = GenericTestValidator.validate(ProviderName("my-generic"), section)
+    result.isLeft shouldBe true
+    val err = result.left.toOption.get.asInstanceOf[ConfigurationError]
+    
+    // "OPENAI_BASE_URL" is generated because we passed ProviderKind.OpenAI
+    err.message should include("- baseUrl: set OPENAI_BASE_URL (e.g. https://api.example.com/)")
+  }
 }

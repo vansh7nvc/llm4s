@@ -121,4 +121,50 @@ class NamedProviderValidatorSpec extends AnyFlatSpec with Matchers {
     config.apiKey shouldBe Some("sk-test-key")
     config.baseUrl shouldBe Some("https://api.openai.com/v1")
   }
+
+  it should "trim whitespace and filter empty strings for all optional fields" in {
+    val section = RawNamedProviderSection(
+      provider = Some("openai"),
+      model = Some("gpt-4"),
+      baseUrl = Some("  https://api.example.com  "),
+      apiKey = Some("  sk-test-key  "),
+      organization = Some("  org-123  "),
+      endpoint = Some("   "), // whitespace only
+      apiVersion = Some("")   // empty string
+    )
+
+    // Azure requires endpoint and apiKey, so we need a provider that doesn't strictly require endpoint for this specific test
+    // Let's use OpenAI and pass requireApiKey = false or provide it.
+    // OpenAIValidator requires apiKey. So we provide apiKey.
+    val result = NamedProviderValidators.OpenAI.validate(ProviderName("my-trim-test"), section)
+
+    result.isRight shouldBe true
+    val config = result.getOrElse(fail("Expected Right"))
+    config.provider shouldBe ProviderKind.OpenAI
+    config.baseUrl shouldBe Some("https://api.example.com")
+    config.apiKey shouldBe Some("sk-test-key")
+    config.organization shouldBe Some("org-123")
+    config.endpoint shouldBe None // should be filtered out because it's just whitespace
+    config.apiVersion shouldBe None // should be filtered out because it's empty
+  }
+
+  it should "return Right(normalized) for Azure when all required fields including endpoint are present" in {
+    val section = RawNamedProviderSection(
+      provider = Some("azure"),
+      model = Some("gpt-4"),
+      baseUrl = None,
+      apiKey = Some("azure-key"),
+      organization = None,
+      endpoint = Some("my-deployment"),
+      apiVersion = None
+    )
+
+    val result = NamedProviderValidators.Azure.validate(ProviderName("my-azure"), section)
+
+    result.isRight shouldBe true
+    val config = result.getOrElse(fail("Expected Right"))
+    config.provider shouldBe ProviderKind.Azure
+    config.apiKey shouldBe Some("azure-key")
+    config.endpoint shouldBe Some("my-deployment")
+  }
 }

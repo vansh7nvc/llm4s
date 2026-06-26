@@ -1,11 +1,13 @@
 package org.llm4s.samples.knowledge
 
+// scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordFinally
+
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.knowledgegraph.neo4j.Neo4jGraphStore
-import org.llm4s.knowledgegraph.{Edge, Node}
+import org.llm4s.knowledgegraph.{ Edge, Node }
 import org.llm4s.knowledgegraph.storage.Direction
 import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.llmconnect.model.{Conversation, SystemMessage, UserMessage}
+import org.llm4s.llmconnect.model.{ Conversation, SystemMessage, UserMessage }
 import org.slf4j.LoggerFactory
 
 object Neo4jKnowledgeGraphExample {
@@ -21,44 +23,56 @@ object Neo4jKnowledgeGraphExample {
       case Right(store) =>
         logger.info("Successfully connected to Neo4j.")
         try {
-          val alice = Node("Alice", "Person", Map("name" -> "Alice", "role" -> "Manager"))
-          val bob = Node("Bob", "Person", Map("name" -> "Bob", "role" -> "Engineer"))
+          val alice    = Node("Alice", "Person", Map("name" -> "Alice", "role" -> "Manager"))
+          val bob      = Node("Bob", "Person", Map("name" -> "Bob", "role" -> "Engineer"))
           val acmeCorp = Node("AcmeCorp", "Organization", Map("name" -> "Acme Corporation"))
-          val london = Node("London", "Location", Map("name" -> "London"))
+          val london   = Node("London", "Location", Map("name" -> "London"))
 
           Seq(alice, bob, acmeCorp, london).foreach { node =>
-            store.upsertNode(node).fold(
-              e => logger.error(s"Failed to upsert node ${node.id}: ${e.formatted}"),
-              _ => ()
-            )
+            store
+              .upsertNode(node)
+              .fold(
+                e => logger.error(s"Failed to upsert node ${node.id}: ${e.formatted}"),
+                _ => ()
+              )
           }
 
-          val bobToAlice = Edge("Bob", "Alice", "REPORTS_TO")
-          val aliceToAcme = Edge("Alice", "AcmeCorp", "WORKS_AT")
+          val bobToAlice   = Edge("Bob", "Alice", "REPORTS_TO")
+          val aliceToAcme  = Edge("Alice", "AcmeCorp", "WORKS_AT")
           val acmeToLondon = Edge("AcmeCorp", "London", "LOCATED_IN")
 
           Seq(bobToAlice, aliceToAcme, acmeToLondon).foreach { edge =>
-            store.upsertEdge(edge).fold(
-              e => logger.error(s"Failed to upsert edge ${edge.relationship}: ${e.formatted}"),
-              _ => ()
-            )
+            store
+              .upsertEdge(edge)
+              .fold(
+                e => logger.error(s"Failed to upsert edge ${edge.relationship}: ${e.formatted}"),
+                _ => ()
+              )
           }
 
           val graphResult = store.getNeighbors("Bob", Direction.Outgoing) match {
             case Right(neighbors) =>
-              neighbors.map { pair =>
-                val rel = pair.edge.relationship
-                val tgt = pair.node.id
-                val secondary = store.getNeighbors(tgt, Direction.Outgoing).getOrElse(Seq.empty).map { p2 =>
-                  val p2Rel = p2.edge.relationship
-                  val p2Tgt = p2.node.id
-                  val tertiary = store.getNeighbors(p2Tgt, Direction.Outgoing).getOrElse(Seq.empty).map { p3 =>
-                     s"which is ${p3.edge.relationship} ${p3.node.id}"
-                  }.mkString(" ")
-                  s"who ${p2Rel} ${p2Tgt} ${tertiary}"
-                }.mkString(" and ")
-                s"Bob ${rel} ${tgt}, ${secondary}"
-              }.mkString("; ")
+              neighbors
+                .map { pair =>
+                  val rel = pair.edge.relationship
+                  val tgt = pair.node.id
+                  val secondary = store
+                    .getNeighbors(tgt, Direction.Outgoing)
+                    .getOrElse(Seq.empty)
+                    .map { p2 =>
+                      val p2Rel = p2.edge.relationship
+                      val p2Tgt = p2.node.id
+                      val tertiary = store
+                        .getNeighbors(p2Tgt, Direction.Outgoing)
+                        .getOrElse(Seq.empty)
+                        .map(p3 => s"which is ${p3.edge.relationship} ${p3.node.id}")
+                        .mkString(" ")
+                      s"who ${p2Rel} ${p2Tgt} ${tertiary}"
+                    }
+                    .mkString(" and ")
+                  s"Bob ${rel} ${tgt}, ${secondary}"
+                }
+                .mkString("; ")
             case Left(err) =>
               logger.error(s"Failed to query graph: ${err.formatted}")
               "No graph context available."
@@ -71,7 +85,7 @@ object Neo4jKnowledgeGraphExample {
             providerCfg     <- Llm4sConfig.defaultProvider()
             registryService <- Llm4sConfig.modelRegistryService()
             given org.llm4s.model.ModelRegistryService = registryService
-            client          <- LLMConnect.getClient(providerCfg)
+            client <- LLMConnect.getClient(providerCfg)
 
             conversation = Conversation(
               Seq(
@@ -89,9 +103,7 @@ object Neo4jKnowledgeGraphExample {
             _ => ()
           )
 
-        } finally {
-          store.close()
-        }
+        } finally store.close()
     }
   }
 }

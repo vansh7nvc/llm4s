@@ -258,7 +258,7 @@ lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner")
   .settings(WorkspaceRunnerDocker.settings)
 
 lazy val samples = (project in file("modules//samples"))
-  .dependsOn(core)
+  .dependsOn(core, knowledgegraphNeo4j)
   .settings(
     name := "samples",
     commonSettings,

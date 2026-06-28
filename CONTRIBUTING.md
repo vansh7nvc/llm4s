@@ -18,6 +18,7 @@ This project follows our [Code of Conduct](CODE_OF_CONDUCT.md). By participating
 ```bash
 git clone https://github.com/YOUR-USERNAME/llm4s.git
 cd llm4s
+git remote add upstream https://github.com/llm4s/llm4s.git   # to sync your fork later
 sbt compile       # should succeed in ~3 minutes first time
 sbt core/test     # run just the unit tests (no API keys needed)
 ```
@@ -28,13 +29,13 @@ sbt core/test     # run just the unit tests (no API keys needed)
 ```
 
 ### 4. Your first change (5-minute exercise)
-Point to a "good first issue" and show the workflow:
+Pick a [good first issue](https://github.com/llm4s/llm4s/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) and follow this workflow:
 ```bash
 git checkout -b my-first-contribution
 # make the change
 sbt scalafmtAll   # format
 sbt core/test     # verify
-git commit -m "Add tests for XYZ"
+git commit -m "[TEST] Add tests for XYZ"
 git push origin my-first-contribution
 # Open PR against main
 ```
@@ -53,7 +54,7 @@ sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 
 ### 7. Where to ask for help
 - **Discord:** [Join the community](https://discord.gg/4uvTPn6qww)
-- **Discussions:** [GitHub Discussions](https://github.com/llm4s/llm4s/discussions)
+- **Issues:** [Open an issue](https://github.com/llm4s/llm4s/issues) for bugs, questions, or feature requests
 - **Dev Hour:** We host a contributor dev hour on Discord every Tuesday at 17:00 UTC.
 
 ## Pull Request Workflow

@@ -36,6 +36,18 @@ private[llm4s] object NamedProviderValidators:
         requireApiKey = true,
       )
 
+  object Requesty extends NamedProviderValidator:
+    def validate(
+      providerName: ProviderName,
+      section: RawNamedProviderSection
+    ): Result[NamedProviderConfig] =
+      validateNamedProviderConfig(
+        providerName = providerName,
+        providerKind = ProviderKind.Requesty,
+        section = section,
+        requireApiKey = true,
+      )
+
   object Azure extends NamedProviderValidator:
     def validate(
       providerName: ProviderName,
@@ -133,7 +145,7 @@ private[llm4s] object NamedProviderValidators:
         requireApiKey = true,
       )
 
-  private def validateNamedProviderConfig(
+  private[config] def validateNamedProviderConfig(
     providerName: ProviderName,
     providerKind: ProviderKind,
     section: RawNamedProviderSection,
@@ -141,69 +153,43 @@ private[llm4s] object NamedProviderValidators:
     requireBaseUrl: Boolean = false,
     requireEndpoint: Boolean = false
   ): Result[NamedProviderConfig] =
-    for
-      normalized <- NamedProviderConfigNormalizer.normalize(providerName, section)
-      _          <- validateProviderKind(providerName, normalized, providerKind)
-      _          <- validateRequiredApiKey(providerName, section, requireApiKey)
-      _          <- validateRequiredBaseUrl(providerName, section, requireBaseUrl)
-      _          <- validateRequiredEndpoint(providerName, section, requireEndpoint)
-    yield normalized
-
-  private def validateProviderKind(
-    providerName: ProviderName,
-    normalized: NamedProviderConfig,
-    expectedKind: ProviderKind
-  ): Result[Unit] =
-    if normalized.provider == expectedKind then Right(())
-    else
-      Left(
-        ConfigurationError(
-          s"Configured provider '${providerName.asName}' resolved to unexpected provider '${normalized.provider.toString}'"
+    NamedProviderConfigNormalizer.normalize(providerName, section).flatMap { normalized =>
+      if normalized.provider != providerKind then
+        Left(
+          ConfigurationError(
+            s"Configured provider '${providerName.asName}' resolved to unexpected provider '${normalized.provider.toString}'"
+          )
         )
-      )
+      else
+        val missingFields = Seq.newBuilder[String]
 
-  private def validateRequiredApiKey(
-    providerName: ProviderName,
-    section: RawNamedProviderSection,
-    required: Boolean
-  ): Result[Unit] =
-    if required then
-      section.apiKey
-        .map(_.trim)
-        .filter(_.nonEmpty)
-        .map(_ => ())
-        .toRight(ConfigurationError(s"Configured provider '${providerName.asName}' is missing required field `apiKey`"))
-    else Right(())
+        val envPrefix           = providerKind.toString.toUpperCase
+        val providerDisplayName = if (providerKind == ProviderKind.Azure) "Azure OpenAI" else providerKind.toString
 
-  private def validateRequiredBaseUrl(
-    providerName: ProviderName,
-    section: RawNamedProviderSection,
-    required: Boolean
-  ): Result[Unit] =
-    if required then
-      section.baseUrl
-        .map(_.trim)
-        .filter(_.nonEmpty)
-        .map(_ => ())
-        .toRight(
-          ConfigurationError(s"Configured provider '${providerName.asName}' is missing required field `baseUrl`")
-        )
-    else Right(())
+        if requireApiKey && section.apiKey.map(_.trim).forall(_.isEmpty) then
+          missingFields += s"  - apiKey: set ${envPrefix}_API_KEY or provide it in llm4s.conf under providers.${providerName.asName}.apiKey"
 
-  private def validateRequiredEndpoint(
-    providerName: ProviderName,
-    section: RawNamedProviderSection,
-    required: Boolean
-  ): Result[Unit] =
-    if required then
-      section.endpoint
-        .map(_.trim)
-        .filter(_.nonEmpty)
-        .map(_ => ())
-        .toRight(
-          ConfigurationError(s"Configured provider '${providerName.asName}' is missing required field `endpoint`")
-        )
-    else Right(())
+        if requireBaseUrl && section.baseUrl.map(_.trim).forall(_.isEmpty) then
+          val exampleUrl = providerKind match
+            case ProviderKind.Ollama => "e.g. http://localhost:11434"
+            case _                   => "e.g. https://api.example.com/"
+
+          missingFields += s"  - baseUrl: set ${envPrefix}_BASE_URL ($exampleUrl)"
+
+        if requireEndpoint && section.endpoint.map(_.trim).forall(_.isEmpty) then
+          val exampleMsg = "the model endpoint/deployment name in your Azure OpenAI resource"
+          missingFields += s"  - endpoint: $exampleMsg"
+
+        val errors = missingFields.result()
+        if errors.nonEmpty then
+          Left(
+            ConfigurationError(
+              s"$providerDisplayName provider '${providerName.asName}' is missing required fields:\n" + errors
+                .mkString("\n")
+            )
+          )
+        else Right(normalized)
+    }
 
 private[llm4s] object NamedProviderConfigValidator:
 

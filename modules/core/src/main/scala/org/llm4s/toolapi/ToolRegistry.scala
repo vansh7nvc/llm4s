@@ -112,7 +112,7 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
           case scala.util.Success(Left(e))  => Left(e)
           case scala.util.Failure(t)        => Left(ToolCallError.ExecutionError(request.functionName, t))
         }
-      case None => Left(ToolCallError.UnknownFunction(request.functionName))
+      case None => Left(ToolCallError.UnknownFunction(request.functionName, tools.map(_.name)))
     }
 
   private def runWithRetry(

@@ -43,8 +43,6 @@ class MCPServerSSESpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
   override def afterAll(): Unit =
     if (server != null) server.stop()
 
-  // ── SSE connection ───────────────────────────────────────────────────────
-
   describe("SSE GET /sse") {
 
     it("should return 200 with Content-Type text/event-stream") {
@@ -57,7 +55,7 @@ class MCPServerSSESpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
       conn.getHeaderField("Content-Type") should include("text/event-stream")
     }
 
-    it("should immediately send an `endpoint` SSE event") {
+    it("should immediately send an endpoint SSE event") {
       val endpointEvent = readFirstSSEEvent(port, "/mcp/sse")
       endpointEvent should include("event: endpoint")
       endpointEvent should include("data: http://")
@@ -72,8 +70,6 @@ class MCPServerSSESpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
       (url1 should not).equal(url2)
     }
   }
-
-  // ── SSE messages endpoint ────────────────────────────────────────────────
 
   describe("SSE POST /mcp/messages") {
 
@@ -94,9 +90,7 @@ class MCPServerSSESpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
     }
   }
 
-  // ── Full SSE round-trip ──────────────────────────────────────────────────
-
-  describe("SSE full round-trip (initialize → tools/list → tools/call)") {
+  describe("SSE full round-trip") {
 
     it("should handle an initialize request and return a 2024-11-05 response") {
       withSSESession(port) { (messageUrl, events) =>
@@ -182,14 +176,12 @@ class MCPServerSSESpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
 
     it("should handle multiple sequential requests on the same SSE session") {
       withSSESession(port) { (messageUrl, events) =>
-        // Send 3 requests
         Seq("msg-1", "msg-2", "msg-3").foreach { id =>
           val req =
             mkRequest(id, "tools/call", Some(ujson.Obj("name" -> "ping", "arguments" -> ujson.Obj("message" -> id))))
           postJson(messageUrl, req) shouldBe 202
         }
 
-        // Collect 3 responses
         val responses = (1 to 3).map { _ =>
           val ev = events.poll(5, TimeUnit.SECONDS)
           ev should not be null
@@ -201,14 +193,48 @@ class MCPServerSSESpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
         responses.foreach(r => r.error shouldBe None)
       }
     }
+
+    it("should acknowledge a JSON-RPC notification (no id) with 202 and no SSE event") {
+      withSSESession(port) { (messageUrl, events) =>
+        val notification = """{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}"""
+        val code         = postJson(messageUrl, notification)
+        code shouldBe 202
+        val event = events.poll(1, TimeUnit.SECONDS)
+        event shouldBe null
+      }
+    }
+
+    it("should return 400 for a POST to messages with an invalid JSON body") {
+      withSSESession(port) { (messageUrl, _) =>
+        val code = postJson(messageUrl, "not-valid-json")
+        code shouldBe 400
+      }
+    }
+
+    it("should return 400 for a POST to messages with valid JSON but un-parseable as JsonRpcRequest") {
+      withSSESession(port) { (messageUrl, _) =>
+        val code = postJson(messageUrl, """{"id":"x","unexpected":true}""")
+        code shouldBe 400
+      }
+    }
+
+    it("should handle SSE initialize request without params using default InitializeRequest") {
+      withSSESession(port) { (messageUrl, events) =>
+        val req      = mkRequest("init-default", "initialize", None)
+        val postCode = postJson(messageUrl, req)
+        postCode shouldBe 202
+
+        val responseEvent = events.poll(5, TimeUnit.SECONDS)
+        responseEvent should not be null
+
+        val response = upickleRead[JsonRpcResponse](extractEventData(responseEvent))
+        response.id shouldBe "init-default"
+        response.error shouldBe None
+        response.result.get("protocolVersion").str shouldBe "2024-11-05"
+      }
+    }
   }
 
-  // ── Helpers ──────────────────────────────────────────────────────────────
-
-  /**
-   * Opens an SSE connection, captures the endpoint URL, and provides an event queue
-   * to the test body. Cleans up the connection after the block returns.
-   */
   private def withSSESession(
     serverPort: Int
   )(body: (String, java.util.concurrent.LinkedBlockingQueue[String]) => Unit): Unit = {
@@ -217,7 +243,6 @@ class MCPServerSSESpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
     val messageUrl    = new AtomicReference[String]("")
     val executor      = Executors.newSingleThreadExecutor()
 
-    // Open SSE connection in background
     val conn = openConnection(serverPort, "/mcp/sse", "GET")
     conn.setRequestProperty("Accept", "text/event-stream")
     conn.setConnectTimeout(3000)
@@ -232,7 +257,6 @@ class MCPServerSSESpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
           var line = reader.readLine()
           while (line != null) {
             if (line.isEmpty) {
-              // End of SSE event
               val event = sb.toString()
               if (event.startsWith("event: endpoint")) {
                 messageUrl.set(extractMessageUrl(event))
@@ -248,7 +272,7 @@ class MCPServerSSESpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
             line = reader.readLine()
           }
         } catch {
-          case _: Exception => // connection closed by test
+          case _: Exception => ()
         }
     })
 

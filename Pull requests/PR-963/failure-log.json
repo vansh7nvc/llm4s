@@ -1,9 +1,0 @@
-{
-  "status": "failed",
-  "failures": [
-    {
-      "step": "buildAll",
-      "error": "SLF4J(W): A number (32) of logging calls during the initialization phase have been intercepted and are\nSLF4J(W): now being replayed. These are subject to the filtering rules of the underlying logging system.\nSLF4J(W): See also https://www.slf4j.org/codes.html#replay\nPython was not found; run without arguments to install from the Microsoft Store, or disable this shortcut from Settings > Apps > Advanced app settings > App execution aliases.\nPython was not found; run without arguments to install from the Microsoft Store, or disable this shortcut from Settings > Apps > Advanced app settings > App execution aliases.\nPython was not found; run without arguments to install from the Microsoft Store, or disable this shortcut from Settings > Apps > Advanced app settings > App execution aliases.\nPython was not found; run without arguments to install from the Microsoft Store, or disable this shortcut from Settings > Apps > Advanced app settings > App execution aliases.\n"
-    }
-  ]
-}

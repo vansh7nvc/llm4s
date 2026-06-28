@@ -1,7 +1,5 @@
 package org.llm4s.samples.knowledge
 
-// scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordFinally
-
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.knowledgegraph.neo4j.Neo4jGraphStore
 import org.llm4s.knowledgegraph.{ Edge, Node }
@@ -9,6 +7,8 @@ import org.llm4s.knowledgegraph.storage.Direction
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model.{ Conversation, SystemMessage, UserMessage }
 import org.slf4j.LoggerFactory
+
+import scala.util.Using
 
 object Neo4jKnowledgeGraphExample {
   private val logger = LoggerFactory.getLogger(getClass)
@@ -22,14 +22,14 @@ object Neo4jKnowledgeGraphExample {
         System.exit(1)
       case Right(store) =>
         logger.info("Successfully connected to Neo4j.")
-        try {
+        Using.resource(store) { storeInstance =>
           val alice    = Node("Alice", "Person", Map("name" -> "Alice", "role" -> "Manager"))
           val bob      = Node("Bob", "Person", Map("name" -> "Bob", "role" -> "Engineer"))
           val acmeCorp = Node("AcmeCorp", "Organization", Map("name" -> "Acme Corporation"))
           val london   = Node("London", "Location", Map("name" -> "London"))
 
           Seq(alice, bob, acmeCorp, london).foreach { node =>
-            store
+            storeInstance
               .upsertNode(node)
               .fold(
                 e => logger.error(s"Failed to upsert node ${node.id}: ${e.formatted}"),
@@ -42,7 +42,7 @@ object Neo4jKnowledgeGraphExample {
           val acmeToLondon = Edge("AcmeCorp", "London", "LOCATED_IN")
 
           Seq(bobToAlice, aliceToAcme, acmeToLondon).foreach { edge =>
-            store
+            storeInstance
               .upsertEdge(edge)
               .fold(
                 e => logger.error(s"Failed to upsert edge ${edge.relationship}: ${e.formatted}"),
@@ -50,21 +50,33 @@ object Neo4jKnowledgeGraphExample {
               )
           }
 
-          val graphResult = store.getNeighbors("Bob", Direction.Outgoing) match {
+          val graphResult = storeInstance.getNeighbors("Bob", Direction.Outgoing) match {
             case Right(neighbors) =>
               neighbors
                 .map { pair =>
                   val rel = pair.edge.relationship
                   val tgt = pair.node.id
-                  val secondary = store
+                  val secondary = storeInstance
                     .getNeighbors(tgt, Direction.Outgoing)
-                    .getOrElse(Seq.empty)
+                    .fold(
+                      e => {
+                        logger.error(s"Failed secondary traversal for $tgt: ${e.formatted}")
+                        Seq.empty
+                      },
+                      identity
+                    )
                     .map { p2 =>
                       val p2Rel = p2.edge.relationship
                       val p2Tgt = p2.node.id
-                      val tertiary = store
+                      val tertiary = storeInstance
                         .getNeighbors(p2Tgt, Direction.Outgoing)
-                        .getOrElse(Seq.empty)
+                        .fold(
+                          e => {
+                            logger.error(s"Failed tertiary traversal for $p2Tgt: ${e.formatted}")
+                            Seq.empty
+                          },
+                          identity
+                        )
                         .map(p3 => s"which is ${p3.edge.relationship} ${p3.node.id}")
                         .mkString(" ")
                       s"who ${p2Rel} ${p2Tgt} ${tertiary}"
@@ -103,7 +115,7 @@ object Neo4jKnowledgeGraphExample {
             _ => ()
           )
 
-        } finally store.close()
+        }
     }
   }
 }

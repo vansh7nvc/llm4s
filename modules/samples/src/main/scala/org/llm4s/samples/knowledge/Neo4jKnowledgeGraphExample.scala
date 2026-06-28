@@ -22,6 +22,7 @@ object Neo4jKnowledgeGraphExample {
         System.exit(1)
       case Right(store) =>
         logger.info("Successfully connected to Neo4j.")
+        given scala.util.Using.Releasable[Neo4jGraphStore] = resource => resource.close()
         Using.resource(store) { storeInstance =>
           val alice    = Node("Alice", "Person", Map("name" -> "Alice", "role" -> "Manager"))
           val bob      = Node("Bob", "Person", Map("name" -> "Bob", "role" -> "Engineer"))

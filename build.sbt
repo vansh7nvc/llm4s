@@ -130,6 +130,7 @@ lazy val llm4s = (project in file("."))
   .aggregate(
     core,
     samples,
+    configPolicy,
     workspaceShared,
     workspaceRunner,
     workspaceClient,
@@ -265,6 +266,16 @@ lazy val samples = (project in file("modules//samples"))
     publish / skip := true,
     coverageEnabled := false,
     libraryDependencies += Deps.termflow
+  )
+
+lazy val configPolicy = (project in file("modules/config-policy"))
+  .dependsOn(core)
+  .settings(
+    name := "llm4s-config-policy",
+    commonSettings,
+    publish / skip := true,
+    coverageEnabled := false,
+    Compile / mainClass := Some("org.llm4s.configpolicy.CheckPolicies")
   )
 
 lazy val workspaceSamples = (project in file("modules/workspace/workspaceSamples"))

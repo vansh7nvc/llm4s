@@ -2,7 +2,7 @@
 layout: page
 title: Troubleshooting / FAQ
 parent: Reference
-nav_order: 8
+nav_order: 11
 ---
 
 # Troubleshooting / FAQ
@@ -15,7 +15,7 @@ This guide addresses common errors and issues you might encounter when building 
 A: Set `LLM_MODEL` and your API key. Example: `export LLM_MODEL=openai/gpt-4o && export OPENAI_API_KEY=sk-...`
 
 **Q: My application configuration isn't overriding the defaults**
-A: LLM4S uses PureConfig. Ensure your `application.conf` is in the `src/main/resources` directory and that you are using `Llm4sConfig.provider()` instead of the legacy `ConfigReader` to load typed settings.
+A: LLM4S uses PureConfig. Ensure your `application.conf` is in the `src/main/resources` directory and that you are using `Llm4sConfig.provider("openai")` (passing your provider name) instead of the legacy `ConfigReader` to load typed settings.
 
 ## Authentication Errors
 
@@ -88,4 +88,4 @@ A: SQLite may lock the database file if accessed concurrently from multiple thre
 A: The workspace requires access to the Docker daemon. If running on Linux, ensure your user is in the `docker` group, or provide the explicit socket path to the `WorkspaceSandboxConfig`.
 
 **Q: Cannot connect to stdio MCP server**
-A: The `MCPTransport.stdio` builder requires the exact command that starts the server. Make sure the executable is in your PATH or provide the absolute path. Example: `MCPClientImpl.stdio(List("npx", "-y", "@modelcontextprotocol/server-sqlite"))`.
+A: Build the server config with `MCPServerConfig.stdio`, which requires the exact command that starts the server, then pass it to `new MCPClientImpl(config)`. Make sure the executable is in your PATH or provide the absolute path. Example: `val config = MCPServerConfig.stdio("sqlite", Seq("npx", "-y", "@modelcontextprotocol/server-sqlite")); val client = new MCPClientImpl(config)`.

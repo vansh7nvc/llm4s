@@ -94,7 +94,7 @@ object ReliableClientExample {
       val attempt = attemptCounter.incrementAndGet()
       if (attempt < 3) {
         logger.info(s"Base Client attempt $attempt: Simulating RateLimitError (429)")
-        Left(RateLimitError("openai-demo", 0L))
+        Left(RateLimitError("openai-demo"))
       } else {
         logger.info(s"Base Client attempt $attempt: Simulating success")
         Right(dummyCompletion)

@@ -275,6 +275,14 @@ lazy val configPolicy = (project in file("modules/config-policy"))
     commonSettings,
     publish / skip := true,
     coverageEnabled := false,
+    // Env-var-based engine CLI (EnvCheckPolicies) calls sys.exit, so its runMain
+    // is forked. Keep the forked working directory at the repo root so the
+    // catalog engine's relative --config paths (CheckPolicies) still resolve.
+    run / fork  := true,
+    Test / fork := true,
+    run / baseDirectory := (LocalRootProject / baseDirectory).value,
+    // Both engines compile here; Deps.config is also available transitively via core.
+    libraryDependencies += Deps.config,
     Compile / mainClass := Some("org.llm4s.configpolicy.CheckPolicies")
   )
 

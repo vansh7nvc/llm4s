@@ -40,6 +40,34 @@ jobs:
           --env=dev
           --config config/examples/application-policy-smoke.conf"
 
+      # Env-var based engine (EnvCheckPolicies) - alternative facet, driven by LLM_* env vars.
+      - name: Validate default prod-safe policy (env engine)
+        env:
+          LLM_PROVIDER: openai
+          LLM_MODEL: gpt-4o-mini
+          LLM_MAX_TOKENS: "2048"
+          LLM_REASONING_BUDGET: "5000"
+          LLM_REGION: eastus
+        run: sbt "configPolicy/runMain org.llm4s.configpolicy.EnvCheckPolicies --env=prod --preset=prod-safe"
+
+      - name: Validate staging-balanced policy (env engine)
+        env:
+          LLM_PROVIDER: gemini
+          LLM_MODEL: gemini-1.5-pro
+          LLM_MAX_TOKENS: "4096"
+          LLM_REASONING_BUDGET: "8000"
+          LLM_REGION: westeurope
+        run: sbt "configPolicy/runMain org.llm4s.configpolicy.EnvCheckPolicies --env=staging --preset=staging-balanced"
+
+      - name: Validate dev-sandbox policy (env engine)
+        env:
+          LLM_PROVIDER: ollama
+          LLM_MODEL: qwen2.5:0.5b
+          LLM_MAX_TOKENS: "12000"
+          LLM_REASONING_BUDGET: "30000"
+          LLM_REGION: eastus
+        run: sbt "configPolicy/runMain org.llm4s.configpolicy.EnvCheckPolicies --env=dev --preset=dev-sandbox"
+
   # Quick checks that should fail fast
   quick-checks:
     name: Quick Checks
@@ -70,7 +98,7 @@ jobs:
   # Code coverage (runs on one configuration to avoid duplication)
   coverage:
     name: Code Coverage
-    needs: quick-checks
+    needs: [quick-checks]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -131,7 +159,7 @@ jobs:
   # Main test matrix
   test:
     name: Test
-    needs: quick-checks
+    needs: [quick-checks]
     permissions:
       contents: read
     strategy:
